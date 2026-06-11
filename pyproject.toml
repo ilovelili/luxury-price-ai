@@ -1,0 +1,21 @@
+[project]
+name = "auction-price-checker-ai"
+version = "0.1.0"
+description = "No-training luxury price estimation service for EcoAuc exports."
+requires-python = ">=3.11"
+dependencies = [
+  "fastapi>=0.115.0",
+  "psycopg[binary]>=3.2.0",
+  "pydantic>=2.8.0",
+  "uvicorn[standard]>=0.30.0",
+]
+
+[project.scripts]
+luxury-price-ai = "luxury_price_ai.cli:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/luxury_price_ai"]
