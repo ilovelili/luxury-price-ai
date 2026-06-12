@@ -93,3 +93,38 @@ curl -X POST http://127.0.0.1:8000/price-estimate \
 - Returns comparable rows with score reasons for appraiser review.
 
 No ML training or image downloading is included in Stage 1.
+
+## Deploy on Render
+
+This repo includes `render.yaml` for a Render Blueprint web service.
+
+Recommended Render settings:
+
+- Service type: Web Service
+- Runtime: Python
+- Plan: Starter
+- Build command: `pip install -e .`
+- Start command: `uvicorn luxury_price_ai.api:app --host 0.0.0.0 --port $PORT`
+- Health check path: `/health`
+
+Required environment variables:
+
+```sh
+DATABASE_URL=postgresql://postgres.ipjilpsybkhhrquoingm:YOUR-PASSWORD@aws-1-ap-northeast-1.pooler.supabase.com:5432/postgres
+APP_API_KEY=replace-with-a-long-random-secret
+PRICE_MARGIN_RATE=0.25
+PRICE_RISK_DISCOUNT_RATE=0.05
+```
+
+`/health` is public for Render health checks. `/price-estimate` requires:
+
+```http
+X-API-Key: <APP_API_KEY>
+```
+
+After deploy, configure Dify's HTTP request node:
+
+- Method: `POST`
+- URL: `https://<render-service>.onrender.com/price-estimate`
+- Header: `X-API-Key: <APP_API_KEY>`
+- Header: `content-type: application/json`

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
-from fastapi import FastAPI, HTTPException
+import hmac
+
+from fastapi import FastAPI, Header, HTTPException
 
 from luxury_price_ai.config import get_settings
 from luxury_price_ai.estimator import estimate_price
@@ -16,8 +18,12 @@ def health() -> dict[str, str]:
 
 
 @app.post("/price-estimate", response_model=PriceEstimateResponse)
-def price_estimate(request: PriceEstimateRequest) -> PriceEstimateResponse:
+def price_estimate(
+    request: PriceEstimateRequest,
+    x_api_key: str | None = Header(default=None),
+) -> PriceEstimateResponse:
     settings = get_settings()
+    require_api_key(settings.app_api_key, x_api_key)
     try:
         store = PostgresStore(settings.database_url or "")
         candidates = store.fetch_candidates(
@@ -31,3 +37,10 @@ def price_estimate(request: PriceEstimateRequest) -> PriceEstimateResponse:
         raise HTTPException(status_code=500, detail=f"database query failed: {exc}") from exc
 
     return estimate_price(request, candidates, settings)
+
+
+def require_api_key(expected: str | None, provided: str | None) -> None:
+    if not expected:
+        return
+    if not provided or not hmac.compare_digest(provided, expected):
+        raise HTTPException(status_code=401, detail="invalid or missing API key")

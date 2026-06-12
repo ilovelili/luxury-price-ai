@@ -9,6 +9,7 @@ class Settings:
     database_url: str | None
     margin_rate: float
     risk_discount_rate: float
+    app_api_key: str | None
 
     @property
     def offer_multiplier(self) -> float:
@@ -20,4 +21,5 @@ def get_settings() -> Settings:
         database_url=os.getenv("DATABASE_URL"),
         margin_rate=float(os.getenv("PRICE_MARGIN_RATE", "0.25")),
         risk_discount_rate=float(os.getenv("PRICE_RISK_DISCOUNT_RATE", "0.05")),
+        app_api_key=os.getenv("APP_API_KEY"),
     )

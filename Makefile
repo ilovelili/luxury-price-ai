@@ -49,6 +49,11 @@ dev:
 	$(call with_env,uv run uvicorn luxury_price_ai.api:app --host "$(HOST)" --port "$(PORT)" --reload)
 
 smoke-estimate:
+	@set -a; \
+	source "$(ENV_FILE)" 2>/dev/null || true; \
+	set +a; \
+	if [[ -n "$$APP_API_KEY" ]]; then auth_header=(-H "X-API-Key: $$APP_API_KEY"); else auth_header=(); fi; \
 	curl -X POST "http://$(HOST):$(PORT)/price-estimate" \
 	  -H "content-type: application/json" \
+	  "$${auth_header[@]}" \
 	  -d '{"brand":"CHANEL","category":"バッグ","shape":"ショルダーバッグ","rank":"AB","title":"CHANEL マトラッセ キャビアスキン 黒 ゴールド金具","limit":20}'
