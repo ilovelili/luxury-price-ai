@@ -57,6 +57,19 @@ When the pricing API returns a range:
 - 「比較落札データをもとに、推定市場価格は〇〇円から〇〇円前後、中間値は〇〇円です。」
 - 「買取提示レンジは、再販リスクと事業マージンを考慮した目安です。」
 
+## Confidence Thresholds
+
+This is the single source of truth for mapping the pricing API output to confidence wording. Other guides reference this section instead of redefining bands.
+
+The pricing API returns `confidence` as a number between `0.0` and `1.0`. Map it as:
+
+- `confidence >= 0.7` -> high confidence wording.
+- `0.4 <= confidence < 0.7` -> medium confidence wording.
+- `0 < confidence < 0.4` -> low confidence wording.
+- `comparable_count == 0`, or `market_price_jpy` is `null`, or `confidence == 0` -> use the no comparable sales wording and do not present an automatic range.
+
+Treat `comparable_count == 0` / `market_price_jpy == null` as the authoritative no-data signal even if a confidence number is present.
+
 When confidence is high:
 
 - 「比較対象が複数確認できるため、現時点の推定信頼度は比較的高めです。」

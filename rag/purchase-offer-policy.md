@@ -48,6 +48,8 @@ Use wording like:
 
 ## Confidence Language
 
+Use the numeric bands defined in `appraisal-writing-style.md` (Confidence Thresholds) to decide which level applies. That section is the single source of truth for the `confidence` cutoffs and the no-comparable-data signal; the wording below is the purchase-offer phrasing for each level.
+
 High confidence:
 
 - 「比較対象が十分にあり、レンジの信頼度は高めです。」

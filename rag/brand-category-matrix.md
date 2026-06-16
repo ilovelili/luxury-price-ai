@@ -76,6 +76,16 @@ For customer-facing Japanese labels, prefer:
 - camping -> キャンプ用品
 - audio -> オーディオ
 
+## Values To Send To The Pricing API
+
+The pricing API matches comparable sales by exact text on `brand`, `category`, and `shape`, so the value you send must match what the auction data stores, not the English routing slug.
+
+- `brand`: send the normalized English brand name (for example `LOUIS VUITTON`, `CHANEL`). Apply the alias normalization above first.
+- `category`: send the Japanese category value used by the auction data (for example `バッグ`, `時計`, `財布・小物`), not the English slug `bags` / `watches`.
+- `shape`: send the Japanese shape value (for example `ショルダーバッグ`, `トートバッグ`).
+
+The English category slugs below name the export scope and are for routing the brand/category reasoning in this matrix. They are not the values to send to the pricing API. Sending an English slug as `category` will not match the auction data and can return zero comparables.
+
 ## Matrix Rules
 
 Use the brand row for brand-specific cues. Use the category column for condition and photo requirements. If a cell is weak or uncommon, do not force a model guess; ask for model name, size, material, serial/authenticity marker, and clearer photos.
@@ -88,7 +98,7 @@ Use the brand row for brand-specific cues. Use the category column for condition
 | Saint Laurent | bags, small-goods, accessories, apparel, shoes | watches | Extract model line, leather, hardware, logo condition, size. |
 | Balenciaga | bags, apparel, shoes, small-goods, accessories | watches | Extract model line, leather/fabric, size, distressing vs damage. |
 | Dior | bags, small-goods, accessories, apparel, shoes | watches, art, ceramics | Extract model line, Oblique/cannage/material, charms, embroidery condition. |
-| GUCCI | bags, small-goods, accessories, apparel, shoes, watches | jewelry/precious-metals | Extract GG line, canvas/leather, hardware, serial tag, size. |
+| GUCCI | bags, small-goods, accessories, apparel, shoes, watches | precious-metals | Extract GG line, canvas/leather, hardware, serial tag, size. |
 | PRADA | bags, small-goods, accessories, apparel, shoes | watches | Extract nylon/Saffiano/leather, triangle logo, model, size, card/accessories. |
 
 ## Category Escalation
