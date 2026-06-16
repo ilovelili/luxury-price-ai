@@ -28,7 +28,7 @@ Use wording like:
 
 - Strong brand and popular model
 - High demand color such as 黒 / ブラック
-- Desirable material such as キャビアスキン for some CHANEL bags
+- Desirable brand/category material, such as キャビアスキン for some CHANEL bags, Togo/Epsom for some HERMES bags, Monogram/Damier for common LOUIS VUITTON items, or Saffiano for some PRADA items
 - Good condition
 - Complete accessories
 - Recent comparable sales with stable prices
@@ -71,6 +71,8 @@ Route to staff review when:
 - No comparable sales are found.
 - Item may be rare, limited, vintage, or collaboration.
 - Watch, jewelry, precious metal, or art category requires specialist review.
+- Technical categories such as cameras, instruments, audio, computers, bicycles, and home appliances have uncertain operation status.
+- Non-core categories such as furniture, consumables, games, camping, sports, ceramics, or hobbies have unclear resale policy or condition.
 - Photos suggest heavy damage.
 - Authenticity marker is missing or unclear.
 - User input conflicts with image evidence.

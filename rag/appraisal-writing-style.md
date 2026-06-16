@@ -8,6 +8,9 @@ Use this guide when writing `査定コメント` for customers or staff. The ton
 - Do not invent prices, comparables, dates, ranks, or item details.
 - Use the pricing API result as the only source of market price, purchase-offer range, confidence, and comparable sales.
 - Use images only for visible product and condition signals.
+- Use `brand-category-matrix.md` to decide which brand/category guidance applies.
+- Use `brand-model-material-guide.md` for brand-specific model, material, color, hardware, and accessory wording.
+- Use `category-appraisal-guide.md` for category-specific condition risks and missing-photo questions.
 - Explain uncertainty clearly when data or photos are insufficient.
 - Keep market price and purchase offer separate.
 
@@ -70,6 +73,7 @@ When no comparable sales are found:
 
 - 「該当条件に近い比較落札データが不足しているため、現時点では価格レンジの提示を控えます。」
 - 「ブランド、型番、サイズ、素材、付属品、状態写真を追加いただけると確認しやすくなります。」
+- 「自動レンジではなく、スタッフ確認を前提とした参考コメントとしてご案内します。」
 
 ## Image Wording
 
