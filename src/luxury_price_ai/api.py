@@ -8,11 +8,58 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 
 from luxury_price_ai.config import get_settings
 from luxury_price_ai.estimator import estimate_price
-from luxury_price_ai.intake import build_price_request_from_description
+from luxury_price_ai.intake import build_price_request_from_form
 from luxury_price_ai.models import PriceEstimateRequest, PriceEstimateResponse
 from luxury_price_ai.storage import DatabaseConfigError, PostgresStore
 
 app = FastAPI(title="Luxury Price AI", version="0.1.0")
+
+CATEGORY_OPTIONS = [
+    "ブランドバッグ",
+    "財布",
+    "時計",
+    "アクセサリー",
+    "服",
+    "スニーカー・靴",
+    "貴金属",
+    "美術品・骨董品",
+]
+
+BRAND_OPTIONS = [
+    "CHANEL",
+    "LOUIS VUITTON",
+    "HERMES",
+    "GUCCI",
+    "PRADA",
+    "DIOR",
+    "CELINE",
+    "FENDI",
+    "ROLEX",
+    "CARTIER",
+    "その他・不明",
+]
+
+SHAPE_OPTIONS = [
+    "ショルダーバッグ",
+    "ハンドバッグ",
+    "トートバッグ",
+    "チェーンウォレット",
+    "財布",
+    "時計",
+    "アクセサリー",
+    "服",
+    "スニーカー・靴",
+    "その他",
+]
+
+CONDITION_OPTIONS = [
+    "新品・未使用",
+    "ほぼ新品",
+    "使用感少ない",
+    "使用感あり",
+    "古い・ダメージあり",
+    "不明",
+]
 
 
 @app.get("/health")
@@ -32,16 +79,31 @@ def appraisal_form() -> HTMLResponse:
 
 @app.post("/appraisal", response_class=HTMLResponse, include_in_schema=False)
 def submit_appraisal_form(
-    item_description: str = Form(...),
+    item_category: str = Form(...),
+    brand: str = Form(...),
+    item_shape: str = Form(...),
+    item_name: str = Form(...),
+    condition_status: str = Form(...),
+    item_color: str = Form(default=""),
+    item_description: str = Form(default=""),
     item_images: list[UploadFile] = File(default=[]),
 ) -> HTMLResponse:
-    request = build_price_request_from_description(item_description, limit=10)
+    form_values = {
+        "item_category": item_category,
+        "brand": brand,
+        "item_shape": item_shape,
+        "item_name": item_name,
+        "item_color": item_color,
+        "condition_status": condition_status,
+        "item_description": item_description,
+    }
+    request = build_price_request_from_form(**form_values, limit=10)
     try:
         response = run_estimate(request)
     except HTTPException as exc:
         return HTMLResponse(
             render_appraisal_page(
-                item_description=item_description,
+                form_values=form_values,
                 error=str(exc.detail),
             ),
             status_code=exc.status_code,
@@ -54,7 +116,7 @@ def submit_appraisal_form(
     ]
     return HTMLResponse(
         render_appraisal_page(
-            item_description=item_description,
+            form_values=form_values,
             image_names=image_names,
             normalized_request=request,
             estimate=response,
@@ -97,13 +159,14 @@ def require_api_key(expected: str | None, provided: str | None) -> None:
 
 
 def render_appraisal_page(
-    item_description: str = "",
+    form_values: dict[str, str] | None = None,
     image_names: list[str] | None = None,
     normalized_request: PriceEstimateRequest | None = None,
     estimate: PriceEstimateResponse | None = None,
     error: str | None = None,
 ) -> str:
     image_names = image_names or []
+    form_values = form_values or {}
     result = render_result(image_names, normalized_request, estimate, error)
     return f"""<!doctype html>
 <html lang="ja">
@@ -113,15 +176,16 @@ def render_appraisal_page(
   <title>Luxury Price Appraisal</title>
   <style>
     :root {{
-      color-scheme: light;
-      --bg: #f7f7f4;
-      --panel: #ffffff;
-      --ink: #1f2528;
-      --muted: #5f686c;
-      --line: #d9ddd8;
-      --accent: #126c5a;
-      --accent-ink: #ffffff;
-      --warn: #8a4b00;
+      color-scheme: dark;
+      --bg: #080807;
+      --panel: #12110f;
+      --panel-2: #181613;
+      --ink: #f3eee5;
+      --muted: #a99d8a;
+      --line: #302a22;
+      --accent: #a88654;
+      --accent-ink: #10100e;
+      --warn: #d0a15d;
     }}
     * {{ box-sizing: border-box; }}
     body {{
@@ -132,10 +196,10 @@ def render_appraisal_page(
       line-height: 1.5;
     }}
     main {{
-      width: min(1120px, calc(100vw - 32px));
-      margin: 32px auto;
+      width: min(1160px, calc(100vw - 32px));
+      margin: 28px auto;
       display: grid;
-      grid-template-columns: minmax(320px, 440px) 1fr;
+      grid-template-columns: minmax(360px, 560px) 1fr;
       gap: 24px;
       align-items: start;
     }}
@@ -155,7 +219,15 @@ def render_appraisal_page(
       background: var(--panel);
       border: 1px solid var(--line);
       border-radius: 8px;
-      padding: 20px;
+      padding: 22px;
+    }}
+    .brandmark {{
+      text-align: center;
+      margin: 34px 0 10px;
+      color: var(--accent);
+      letter-spacing: 6px;
+      font-family: Georgia, "Times New Roman", serif;
+      font-size: 22px;
     }}
     .lede {{ color: var(--muted); }}
     label {{
@@ -163,16 +235,20 @@ def render_appraisal_page(
       margin: 16px 0 6px;
       font-weight: 650;
     }}
-    textarea, input[type="file"] {{
+    textarea, select, input[type="text"], input[type="file"] {{
       width: 100%;
       border: 1px solid var(--line);
       border-radius: 6px;
-      background: #fff;
+      background: var(--panel-2);
       color: var(--ink);
       font: inherit;
     }}
+    select, input[type="text"] {{
+      height: 44px;
+      padding: 0 12px;
+    }}
     textarea {{
-      min-height: 180px;
+      min-height: 96px;
       padding: 12px;
       resize: vertical;
     }}
@@ -205,7 +281,7 @@ def render_appraisal_page(
       border: 1px solid var(--line);
       border-radius: 8px;
       padding: 12px;
-      background: #fbfbf9;
+      background: var(--panel-2);
     }}
     .metric b {{
       display: block;
@@ -221,13 +297,13 @@ def render_appraisal_page(
       border: 1px solid var(--line);
       border-radius: 999px;
       padding: 4px 9px;
-      background: #fbfbf9;
+      background: var(--panel-2);
       font-size: 13px;
     }}
     .warning {{
       color: var(--warn);
-      background: #fff7e8;
-      border: 1px solid #e9c88d;
+      background: #201811;
+      border: 1px solid #5a4124;
       border-radius: 8px;
       padding: 12px;
       margin-bottom: 14px;
@@ -245,20 +321,38 @@ def render_appraisal_page(
   </style>
 </head>
 <body>
+  <div class="brandmark">TRUNK</div>
   <main>
     <section class="panel">
       <h1>Luxury Price Appraisal</h1>
-      <p class="lede">商品説明を自然文で入力し、査定用写真をアップロードしてください。ブランド・形状・ランクなどは裏側で推定します。</p>
+      <p class="lede">カテゴリを選び、商品写真と分かる範囲の情報を追加してください。</p>
       <form action="/appraisal" method="post" enctype="multipart/form-data">
-        <label for="item_description">Item description</label>
-        <textarea id="item_description" name="item_description" required placeholder="例: CHANEL マトラッセ キャビアスキン 黒 ゴールド金具 AB ショルダーバッグ">{escape(item_description)}</textarea>
-        <p class="hint">正規化済みの入力は不要です。分かる範囲で、ブランド、モデル、素材、色、金具、状態、付属品を書いてください。</p>
+        <label for="item_category">カテゴリ</label>
+        {render_select("item_category", CATEGORY_OPTIONS, form_values.get("item_category", "ブランドバッグ"))}
 
-        <label for="item_images">Item images</label>
-        <input id="item_images" name="item_images" type="file" accept="image/*" multiple>
-        <p class="hint">推奨: 正面、背面、角、内側/シリアル、金具、ダメージ箇所。Stage 1では価格計算には使わず、状態確認メモとして扱います。</p>
+        <label for="brand">ブランド</label>
+        {render_select("brand", BRAND_OPTIONS, form_values.get("brand", "CHANEL"))}
 
-        <button type="submit">Estimate price</button>
+        <label for="item_shape">アイテム種別・形状</label>
+        {render_select("item_shape", SHAPE_OPTIONS, form_values.get("item_shape", "ショルダーバッグ"))}
+
+        <label for="item_name">アイテム名・型番</label>
+        <input id="item_name" name="item_name" type="text" required placeholder="例: マトラッセ キャビアスキン" value="{escape(form_values.get("item_name", ""))}">
+
+        <label for="item_color">カラー</label>
+        <input id="item_color" name="item_color" type="text" placeholder="例: 黒 / ゴールド金具" value="{escape(form_values.get("item_color", ""))}">
+
+        <label for="condition_status">状態</label>
+        {render_select("condition_status", CONDITION_OPTIONS, form_values.get("condition_status", "使用感少ない"))}
+
+        <label for="item_description">商品説明・補足</label>
+        <textarea id="item_description" name="item_description" placeholder="サイズ感、購入時期、付属品、ダメージなど">{escape(form_values.get("item_description", ""))}</textarea>
+
+        <label for="item_images">商品写真</label>
+        <input id="item_images" name="item_images" type="file" accept="image/*" multiple required>
+        <p class="hint">正面、背面、角、内側/シリアル、金具、ダメージ箇所</p>
+
+        <button type="submit">査定レンジを見る</button>
       </form>
     </section>
     <section class="panel">
@@ -267,6 +361,18 @@ def render_appraisal_page(
   </main>
 </body>
 </html>"""
+
+
+def render_select(name: str, options: list[str], selected: str) -> str:
+    option_html = "\n".join(
+        f'<option value="{escape(option)}"{selected_attr(option, selected)}>{escape(option)}</option>'
+        for option in options
+    )
+    return f'<select id="{escape(name)}" name="{escape(name)}" required>{option_html}</select>'
+
+
+def selected_attr(option: str, selected: str) -> str:
+    return " selected" if option == selected else ""
 
 
 def render_result(
