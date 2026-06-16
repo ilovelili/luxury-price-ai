@@ -114,6 +114,9 @@ DATABASE_URL=postgresql://postgres.ipjilpsybkhhrquoingm:YOUR-PASSWORD@aws-1-ap-n
 APP_API_KEY=replace-with-a-long-random-secret
 PRICE_MARGIN_RATE=0.25
 PRICE_RISK_DISCOUNT_RATE=0.05
+DIFY_API_KEY=app-xxxxxxxxxxxxxxxx
+DIFY_BASE_URL=https://api.dify.ai/v1
+DIFY_USER=luxury-price-appraisal-web
 ```
 
 `/health` is public for Render health checks. `/price-estimate` requires:
@@ -128,3 +131,20 @@ After deploy, configure Dify's HTTP request node:
 - URL: `https://<render-service>.onrender.com/price-estimate`
 - Header: `X-API-Key: <APP_API_KEY>`
 - Header: `content-type: application/json`
+
+## Dify Behind the Custom Form
+
+The public `/appraisal` form is owned by this repo for a cleaner TRUNK-style intake UX. After the deterministic price estimate is computed, the server calls Dify when `DIFY_API_KEY` is configured.
+
+Expected Dify workflow inputs:
+
+- `item_description`
+- `item_category`
+- `brand`
+- `item_shape`
+- `item_name`
+- `item_color`
+- `condition_status`
+- `item_photos`
+
+If Dify is not configured or the workflow call fails, `/appraisal` still returns the local deterministic estimate and comparable sales evidence.

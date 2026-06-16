@@ -7,6 +7,7 @@ from fastapi import FastAPI, File, Form, Header, HTTPException, UploadFile
 from fastapi.responses import HTMLResponse, RedirectResponse
 
 from luxury_price_ai.config import get_settings
+from luxury_price_ai.dify import DifyClient, DifyConfigError, DifyDraft
 from luxury_price_ai.estimator import estimate_price
 from luxury_price_ai.intake import build_price_request_from_form
 from luxury_price_ai.models import PriceEstimateRequest, PriceEstimateResponse
@@ -109,6 +110,7 @@ def submit_appraisal_form(
             status_code=exc.status_code,
         )
 
+    dify_draft, dify_error = run_dify_appraisal(form_values, response, item_images)
     image_names = [
         image.filename
         for image in item_images
@@ -120,6 +122,8 @@ def submit_appraisal_form(
             image_names=image_names,
             normalized_request=request,
             estimate=response,
+            dify_draft=dify_draft,
+            dify_error=dify_error,
         )
     )
 
@@ -151,6 +155,27 @@ def run_estimate(request: PriceEstimateRequest) -> PriceEstimateResponse:
     return estimate_price(request, candidates, settings)
 
 
+def run_dify_appraisal(
+    form_values: dict[str, str],
+    estimate: PriceEstimateResponse,
+    images: list[UploadFile],
+) -> tuple[DifyDraft | None, str | None]:
+    settings = get_settings()
+    try:
+        client = DifyClient(settings)
+    except DifyConfigError:
+        return None, None
+    try:
+        draft = client.run_appraisal_workflow(
+            form_values=form_values,
+            estimate=estimate,
+            images=images,
+        )
+    except Exception as exc:
+        return None, f"Dify workflow failed: {exc}"
+    return draft, None
+
+
 def require_api_key(expected: str | None, provided: str | None) -> None:
     if not expected:
         return
@@ -163,11 +188,13 @@ def render_appraisal_page(
     image_names: list[str] | None = None,
     normalized_request: PriceEstimateRequest | None = None,
     estimate: PriceEstimateResponse | None = None,
+    dify_draft: DifyDraft | None = None,
+    dify_error: str | None = None,
     error: str | None = None,
 ) -> str:
     image_names = image_names or []
     form_values = form_values or {}
-    result = render_result(image_names, normalized_request, estimate, error)
+    result = render_result(image_names, normalized_request, estimate, dify_draft, dify_error, error)
     return f"""<!doctype html>
 <html lang="ja">
 <head>
@@ -379,6 +406,8 @@ def render_result(
     image_names: list[str],
     normalized_request: PriceEstimateRequest | None,
     estimate: PriceEstimateResponse | None,
+    dify_draft: DifyDraft | None,
+    dify_error: str | None,
     error: str | None,
 ) -> str:
     if error:
@@ -390,12 +419,14 @@ def render_result(
 
     normalized = render_normalized_request(normalized_request)
     image_summary = render_image_summary(image_names)
+    draft = render_dify_draft(dify_draft, dify_error)
     market = render_price_range("推定市場価格", estimate.market_price_jpy)
     offer = render_price_range("買取提示レンジ", estimate.purchase_offer_jpy)
     missing = ", ".join(estimate.missing_inputs) if estimate.missing_inputs else "なし"
     comparables = "\n".join(render_comparable(item) for item in estimate.comparables[:5])
     return f"""
 <h2>Estimate result</h2>
+{draft}
 {normalized}
 {image_summary}
 <div class="grid">
@@ -406,6 +437,16 @@ def render_result(
 <h2>Comparable sales</h2>
 {comparables or '<p>No comparable sales found.</p>'}
 """
+
+
+def render_dify_draft(dify_draft: DifyDraft | None, dify_error: str | None) -> str:
+    if dify_draft and dify_draft.text:
+        body = "<br>".join(escape(line) for line in dify_draft.text.splitlines())
+        return f"""<h2>Dify appraisal draft</h2>
+<div class="warning">{body}</div>"""
+    if dify_error:
+        return f"""<div class="warning">{escape(dify_error)} Local deterministic estimate is shown below.</div>"""
+    return ""
 
 
 def render_normalized_request(request: PriceEstimateRequest) -> str:

@@ -16,3 +16,9 @@ services:
         value: "0.25"
       - key: PRICE_RISK_DISCOUNT_RATE
         value: "0.05"
+      - key: DIFY_API_KEY
+        sync: false
+      - key: DIFY_BASE_URL
+        value: "https://api.dify.ai/v1"
+      - key: DIFY_USER
+        value: "luxury-price-appraisal-web"

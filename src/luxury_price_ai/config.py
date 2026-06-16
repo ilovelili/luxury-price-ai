@@ -10,6 +10,9 @@ class Settings:
     margin_rate: float
     risk_discount_rate: float
     app_api_key: str | None
+    dify_api_key: str | None
+    dify_base_url: str
+    dify_user: str
 
     @property
     def offer_multiplier(self) -> float:
@@ -22,4 +25,7 @@ def get_settings() -> Settings:
         margin_rate=float(os.getenv("PRICE_MARGIN_RATE", "0.25")),
         risk_discount_rate=float(os.getenv("PRICE_RISK_DISCOUNT_RATE", "0.05")),
         app_api_key=os.getenv("APP_API_KEY"),
+        dify_api_key=os.getenv("DIFY_API_KEY"),
+        dify_base_url=os.getenv("DIFY_BASE_URL", "https://api.dify.ai/v1").rstrip("/"),
+        dify_user=os.getenv("DIFY_USER", "luxury-price-appraisal-web"),
     )
