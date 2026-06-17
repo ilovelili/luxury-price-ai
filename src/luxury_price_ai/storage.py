@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from collections.abc import Iterable
 from datetime import date
 from pathlib import Path
 import socket
@@ -39,28 +38,6 @@ class PostgresStore:
                 conn.execute(sql)
         except psycopg.OperationalError as exc:
             raise DatabaseConnectionError(explain_connection_error(exc)) from exc
-
-    def upsert_sales(self, sales: Iterable[AuctionSale], batch_size: int = 500) -> int:
-        import psycopg
-        from psycopg.types.json import Jsonb
-
-        rows = []
-        total = 0
-        try:
-            with psycopg.connect(self.database_url) as conn:
-                with conn.cursor() as cur:
-                    for sale in sales:
-                        rows.append(_sale_params(sale, Jsonb))
-                        if len(rows) >= batch_size:
-                            cur.executemany(UPSERT_SQL, rows)
-                            total += len(rows)
-                            rows = []
-                    if rows:
-                        cur.executemany(UPSERT_SQL, rows)
-                        total += len(rows)
-        except psycopg.OperationalError as exc:
-            raise DatabaseConnectionError(explain_connection_error(exc)) from exc
-        return total
 
     def check_connection(self) -> dict[str, str]:
         import psycopg
@@ -116,37 +93,6 @@ class PostgresStore:
         except psycopg.OperationalError as exc:
             raise DatabaseConnectionError(explain_connection_error(exc)) from exc
         return [AuctionSale.model_validate(dict(row)) for row in rows]
-
-
-UPSERT_SQL = """
-insert into public.auction_sales (
-  item_id, brand, category, shape, rank, title, sold_date, price_jpy,
-  item_url, image_url, auction, source_month, raw_payload
-) values (
-  %(item_id)s, %(brand)s, %(category)s, %(shape)s, %(rank)s, %(title)s,
-  %(sold_date)s, %(price_jpy)s, %(item_url)s, %(image_url)s, %(auction)s,
-  %(source_month)s, %(raw_payload)s
-)
-on conflict (item_id) do update set
-  brand = excluded.brand,
-  category = excluded.category,
-  shape = excluded.shape,
-  rank = excluded.rank,
-  title = excluded.title,
-  sold_date = excluded.sold_date,
-  price_jpy = excluded.price_jpy,
-  item_url = excluded.item_url,
-  image_url = excluded.image_url,
-  auction = excluded.auction,
-  source_month = excluded.source_month,
-  raw_payload = excluded.raw_payload
-"""
-
-
-def _sale_params(sale: AuctionSale, jsonb_factory: Any) -> dict[str, Any]:
-    data = sale.model_dump()
-    data["raw_payload"] = jsonb_factory(sale.raw_payload)
-    return data
 
 
 def explain_connection_error(exc: Exception) -> str:

@@ -1,7 +1,7 @@
 [project]
 name = "auction-price-checker-ai"
 version = "0.1.0"
-description = "No-training luxury price estimation service for EcoAuc exports."
+description = "Luxury price estimation service."
 requires-python = ">=3.11"
 dependencies = [
   "fastapi>=0.115.0",

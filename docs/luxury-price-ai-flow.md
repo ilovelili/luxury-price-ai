@@ -20,7 +20,7 @@ Dify is useful for:
 
 Keep outside Dify:
 
-- Auction CSV ingestion and cleansing.
+- Auction data ingestion and cleansing.
 - Similar-item search over structured fields and embeddings.
 - Statistical price estimation.
 - Image download/storage and image embeddings.
@@ -47,10 +47,10 @@ This is enough to build an MVP for CHANEL bags using structured similarity and c
 
 ```mermaid
 flowchart LR
-  GH["GitHub Actions EcoAuc CSV export"] --> Store["Object storage: raw CSV + images"]
-  Store --> ETL["Ingestion job: clean, dedupe, normalize"]
-  ETL --> DB["Postgres: auction rows, parsed attributes"]
-  ETL --> Vec["Vector DB: title/image embeddings"]
+  Scraper["auction-price-checker EcoAuc scraper"] --> Raw["Optional raw archive: CSV/HTML/image metadata"]
+  Scraper --> DB["Supabase Postgres: normalized auction_sales"]
+  DB --> VecJob["Embedding/enrichment jobs"]
+  VecJob --> Vec["Vector DB: title/image embeddings"]
   Site["TRUNK査定 form / LINE / admin UI"] --> API["App backend"]
   API --> Dify["Dify workflow"]
   Dify --> Price["Pricing service"]
@@ -62,6 +62,8 @@ flowchart LR
   Result --> Feedback["Human quote + correction"]
   Feedback --> DB
 ```
+
+The preferred handoff is no longer a ZIP artifact. The companion `auction-price-checker` repo should upsert normalized rows directly into Supabase, keyed by `item_id`. Raw CSV/ZIP files can still be archived for audit/backfill, but the pricing service should not depend on importing them during the appraisal flow.
 
 ## MVP Flow
 
@@ -187,26 +189,43 @@ Example response:
 }
 ```
 
+## Direct Supabase Ingestion Contract
+
+The scraper/export repo should write to `public.auction_sales` with this minimum contract:
+
+- `item_id`: EcoAuc item id, unique and stable.
+- `brand`: uppercase normalized brand.
+- `category`, `shape`, `rank`, `title`: preserved source meaning, including Japanese appraisal terms.
+- `sold_date`: parsed date when available.
+- `price_jpy`: integer sale price.
+- `item_url`, `image_url`, `auction`, `source_month`: evidence and source metadata.
+- `raw_payload`: original row JSON for debugging and future re-normalization.
+
+Use idempotent upserts so rerunning a scrape for the same month updates rows without creating duplicates. This keeps the appraisal API simple: `/price-estimate` reads comparable rows from Supabase and never waits for a ZIP import step.
+
 ## Immediate Next Steps
 
-1. Build ingestion in this repo:
-   - unzip GitHub Action artifacts.
-   - load CSV rows into Postgres or SQLite for MVP.
-   - normalize rank, price, sold date, category, shape.
-2. Add title parsing:
+1. Move normal ingestion into `auction-price-checker`:
+   - normalize rank, price, sold date, category, shape before write.
+   - upsert directly into Supabase `public.auction_sales`.
+   - keep raw export/archive only for audit and backfill.
+2. Keep this repo focused on pricing reads:
+   - maintain schema migrations.
+   - verify `/price-estimate` uses comparable evidence from Supabase.
+3. Add title parsing:
    - brand-specific model dictionary for CHANEL/LV/Hermes.
    - Japanese material/color/hardware/accessory tokens.
-3. Create `/price-estimate` endpoint:
+4. Create `/price-estimate` endpoint:
    - comparable retrieval.
    - percentile range.
    - confidence and missing-input flags.
-4. Configure a Dify workflow:
+5. Configure a Dify workflow:
    - front the pricing endpoint with LLM extraction and final wording.
-5. Add image processing:
+6. Add image processing:
    - persist EcoAuc image URLs/images.
    - generate image embeddings.
    - compare uploaded item photos to historical images.
-6. Evaluate with human appraiser feedback:
+7. Evaluate with human appraiser feedback:
    - quote accepted/edited.
    - final purchase price.
    - reason for override.

@@ -2,7 +2,15 @@
 
 Stage 1 no-training price estimator for luxury appraisal workflows.
 
-This service imports EcoAuc/Ecoring CSV exports, stores normalized auction sales in Supabase Postgres, and exposes a FastAPI endpoint that returns comparable-sales price ranges.
+This service reads normalized EcoAuc/Ecoring auction sales from Supabase Postgres and exposes a FastAPI endpoint that returns comparable-sales price ranges.
+
+The primary ingestion path is direct Supabase upsert from the companion scraper/export repository:
+
+```text
+/Users/min/Projects/src/github.com/ilovelili/auction-price-checker
+```
+
+That repo writes auction rows directly into `public.auction_sales`. This repo does not import EcoAuc ZIP/CSV exports; it reads normalized rows from Supabase for comparable search and price estimation.
 
 ## Supabase Target
 
@@ -43,19 +51,27 @@ luxury-price-ai migrate
 
 This applies `migrations/001_create_auction_sales.sql`, creating `public.auction_sales` with RLS enabled and no public read policy.
 
-## Import EcoAuc Export
+## Direct Supabase Ingestion
 
-Dry run against the sample ZIP:
+The companion `auction-price-checker` repo should normalize each EcoAuc row and upsert into `public.auction_sales` using the same column contract as this service:
 
-```sh
-luxury-price-ai import --dry-run /Users/min/Downloads/ecoauc-export-27178494880-chanel.zip
-```
+| Source field | Supabase column | Notes |
+| --- | --- | --- |
+| `itemId` | `item_id` | Stable unique key; used for idempotent upserts. |
+| `brand` or `brandQuery` | `brand` | Store uppercase normalized brand. |
+| `category` | `category` | Preserve Japanese category names such as `バッグ`. |
+| `shape` | `shape` | Preserve Japanese shape names such as `ショルダーバッグ`. |
+| `rank` | `rank` | Uppercase auction condition rank; useful but noisy. |
+| `title` | `title` | Required; used for token matching. |
+| `soldDate` | `sold_date` | ISO date when available. |
+| `priceJpy` | `price_jpy` | Integer JPY sale price. |
+| `itemUrl` | `item_url` | Comparable evidence link. |
+| `imageUrl` | `image_url` | Evidence/training pointer, subject to access/licensing checks. |
+| `auction` | `auction` | Source auction label. |
+| `month` | `source_month` | Export/search month. |
+| full row | `raw_payload` | Original source row as JSONB for audit/debugging. |
 
-Import into Supabase:
-
-```sh
-luxury-price-ai import /Users/min/Downloads/ecoauc-export-27178494880-chanel.zip
-```
+Use `on conflict (item_id) do update` so repeated scraper runs are safe and the pricing service always sees the latest normalized data.
 
 ## Run API
 
