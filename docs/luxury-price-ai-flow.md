@@ -169,6 +169,7 @@ Example response:
   },
   "purchase_offer_jpy": {
     "low": 210000,
+    "mid": 270000,
     "high": 300000
   },
   "confidence": 0.72,
