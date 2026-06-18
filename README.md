@@ -1,8 +1,8 @@
 # auction-price-checker-ai
 
-Stage 1 no-training price estimator for luxury appraisal workflows.
+Stage 1 auction sales analysis app for luxury appraisal workflows.
 
-This service reads normalized EcoAuc/Ecoring auction sales from Supabase Postgres and exposes a FastAPI endpoint that returns comparable-sales price ranges.
+This service reads normalized EcoAuc/Ecoring auction sales from Supabase Postgres and exposes FastAPI endpoints for auction-record analysis. The main app starts from median, average, quartiles, recent movement, and matching sale records instead of AI-generated prices.
 
 The primary ingestion path is direct Supabase upsert from the companion scraper/export repository:
 
@@ -71,7 +71,7 @@ The companion `auction-price-checker` repo should normalize each EcoAuc row and 
 | `month` | `source_month` | Export/search month. |
 | full row | `raw_payload` | Original source row as JSONB for audit/debugging. |
 
-Use `on conflict (item_id) do update` so repeated scraper runs are safe and the pricing service always sees the latest normalized data.
+Use `on conflict (item_id) do update` so repeated scraper runs are safe and the analysis service always sees the latest normalized data.
 
 ## Run API
 
@@ -85,7 +85,22 @@ Health check:
 curl http://127.0.0.1:8000/health
 ```
 
-Sample price estimate:
+Sample auction analysis:
+
+```sh
+curl -X POST http://127.0.0.1:8000/auction-analysis \
+  -H 'content-type: application/json' \
+  -d '{
+    "brand": "CHANEL",
+    "category": "バッグ",
+    "shape": "ショルダーバッグ",
+    "rank": "AB",
+    "title": "CHANEL マトラッセ キャビアスキン 黒 ゴールド金具",
+    "limit": 50
+  }'
+```
+
+Legacy price estimate:
 
 ```sh
 curl -X POST http://127.0.0.1:8000/price-estimate \
@@ -102,11 +117,12 @@ curl -X POST http://127.0.0.1:8000/price-estimate \
 
 ## Stage 1 Behavior
 
-- Filters comparable sales by brand/category.
-- Scores by shape, rank similarity, shared CHANEL title tokens, title overlap, and recency.
-- Returns p25/median/p75 market range.
-- Applies margin/risk discount separately for purchase-offer range.
-- Returns comparable rows with score reasons for appraiser review.
+- The default `/auction-analysis` UI shows auction-record analysis.
+- The `/ai-price-appraisal` UI keeps the legacy AI price appraisal flow available from the nav.
+- Filters auction sales by explicit fields: brand/category from the database query, then shape/rank when provided.
+- Returns matching auction records, average, median, p25/p75, min/max, histogram bins, current 7-day versus previous 7-day movement, and a 3-month line chart of 7-day median windows.
+- Keeps `/price-estimate` available as a legacy deterministic comparable-sales endpoint.
+- Images are collected for staff review context only and are not used in numeric analysis.
 
 No ML training or image downloading is included in Stage 1.
 
@@ -128,31 +144,33 @@ Required environment variables:
 ```sh
 DATABASE_URL=postgresql://postgres.ipjilpsybkhhrquoingm:YOUR-PASSWORD@aws-1-ap-northeast-1.pooler.supabase.com:5432/postgres
 APP_API_KEY=replace-with-a-long-random-secret
-PRICE_MARGIN_RATE=0.25
-PRICE_RISK_DISCOUNT_RATE=0.05
-DIFY_API_KEY=app-xxxxxxxxxxxxxxxx
-DIFY_BASE_URL=https://api.dify.ai/v1
-DIFY_USER=luxury-price-appraisal-web
 ```
 
-`/health` is public for Render health checks. `/price-estimate` requires:
+Optional legacy `/price-estimate` environment variables:
+
+```sh
+PRICE_MARGIN_RATE=0.25
+PRICE_RISK_DISCOUNT_RATE=0.05
+```
+
+`/health` is public for Render health checks. `/auction-analysis` and `/price-estimate` require:
 
 ```http
 X-API-Key: <APP_API_KEY>
 ```
 
-After deploy, configure Dify's HTTP request node:
+If using the analysis endpoint from Dify or another tool, configure the HTTP request node:
 
 - Method: `POST`
-- URL: `https://<render-service>.onrender.com/price-estimate`
+- URL: `https://<render-service>.onrender.com/auction-analysis`
 - Header: `X-API-Key: <APP_API_KEY>`
 - Header: `content-type: application/json`
 
-## Dify Behind the Custom Form
+## Custom Form
 
-The public `/appraisal` form is owned by this repo for a cleaner TRUNK-style intake UX. After the deterministic price estimate is computed, the server calls Dify when `DIFY_API_KEY` is configured.
+The public `/auction-analysis` form is owned by this repo for a cleaner TRUNK-style intake UX. It calls the local analysis flow and shows matching auction records, summary statistics, charts, and recent movement. `/ai-price-appraisal` remains available for automated price-range appraisal.
 
-Expected Dify workflow inputs:
+Current form inputs:
 
 - `item_description`
 - `item_category`
@@ -163,4 +181,4 @@ Expected Dify workflow inputs:
 - `condition_status`
 - `item_photos`
 
-If Dify is not configured or the workflow call fails, `/appraisal` still returns the local deterministic estimate and comparable sales evidence.
+Images are received for staff review context, but they do not affect the analysis numbers.
