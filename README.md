@@ -175,7 +175,7 @@ If using the analysis endpoint from Dify or another tool, configure the HTTP req
 
 ## Custom Form
 
-The public `/auction-analysis` form is owned by this repo for a cleaner TRUNK-style intake UX. It calls the local analysis flow and shows matching auction records, summary statistics, charts, and recent movement. `/image-auction-analysis` accepts uploaded photos, infers search conditions, and shows market/purchase price ranges with the same auction evidence. `/image-inspection` remains available for standalone photo review.
+The public `/auction-analysis` form is owned by this repo for a cleaner TRUNK-style intake UX. It calls the local analysis flow and shows matching auction records, summary statistics, charts, and recent movement. `/image-auction-analysis` accepts uploaded photos, infers search conditions, and shows market/purchase price ranges with the same auction evidence. Image inspection remains available as an API for Dify/internal flows, but there is no separate image-check page in the staff UI.
 
 Current form inputs:
 
@@ -188,9 +188,9 @@ Current form inputs:
 - `condition_status`
 - `item_photos`
 
-Images are received for staff review context or `/image-inspection`. In `/image-auction-analysis`, image-derived brand/model/condition signals are used to fill missing search conditions before the auction analysis and price-range calculation.
+Images are received for staff review context. In `/image-auction-analysis`, image-derived brand/model/condition signals are used to fill missing search conditions before the auction analysis and price-range calculation.
 
-For `/image-inspection`, the recommended upload is 6 photos:
+For `/image-auction-analysis`, the recommended upload is 6 photos:
 
 - Front full view
 - Back full view

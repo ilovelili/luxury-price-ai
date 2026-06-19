@@ -31,7 +31,6 @@ from luxury_price_ai.models import (
 )
 from luxury_price_ai.storage import DatabaseConfigError, PostgresStore
 from luxury_price_ai.vision import (
-    MAX_IMAGES,
     RECOMMENDED_PHOTO_ANGLES,
     ImagePayload,
     VisionConfigError,
@@ -224,35 +223,6 @@ def submit_image_auction_analysis_form(
             form_values=form_values,
             image_names=image_names,
             response=response,
-        )
-    )
-
-
-@app.get("/image-inspection", response_class=HTMLResponse, include_in_schema=False)
-def image_inspection_page() -> HTMLResponse:
-    return HTMLResponse(render_image_inspection_page())
-
-
-@app.post("/image-inspection", response_class=HTMLResponse, include_in_schema=False)
-def submit_image_inspection_form(
-    item_images: list[UploadFile] = File(default=[]),
-) -> HTMLResponse:
-    try:
-        response = run_image_inspection(item_images)
-    except HTTPException as exc:
-        return HTMLResponse(
-            render_image_inspection_page(error=str(exc.detail)),
-            status_code=exc.status_code,
-        )
-    image_names = [
-        image.filename
-        for image in item_images
-        if image.filename
-    ]
-    return HTMLResponse(
-        render_image_inspection_page(
-            image_names=image_names,
-            inspection=response,
         )
     )
 
@@ -573,27 +543,6 @@ def render_image_auction_analysis_page(
     )
 
 
-def render_image_inspection_page(
-    image_names: list[str] | None = None,
-    inspection: ImageInspectionResponse | None = None,
-    error: str | None = None,
-) -> str:
-    image_names = image_names or []
-    result = render_image_inspection_result(image_names, inspection, error)
-    return render_page_shell(
-        form_values={},
-        result=result,
-        active_page="image",
-        page_title="Image Inspection",
-        heading="Image Inspection",
-        lede="商品写真からブランド候補と見える範囲の状態を確認します。結果は参考情報です。",
-        form_action="/image-inspection",
-        submit_label="画像をチェックする",
-        show_image_upload=True,
-        form_body=render_image_inspection_form_body(),
-    )
-
-
 def render_page_shell(
     *,
     form_values: dict[str, str],
@@ -609,7 +558,6 @@ def render_page_shell(
 ) -> str:
     analysis_active = " active" if active_page == "analysis" else ""
     image_analysis_active = " active" if active_page == "image_analysis" else ""
-    image_active = " active" if active_page == "image" else ""
     image_upload = render_image_upload_control() if show_image_upload else ""
     controls = form_body if form_body is not None else render_appraisal_form_body(
         form_values=form_values,
@@ -897,7 +845,6 @@ def render_page_shell(
     <nav>
       <a class="{analysis_active}" href="/auction-analysis">落札記録分析</a>
       <a class="{image_analysis_active}" href="/image-auction-analysis">画像相場検索</a>
-      <a class="{image_active}" href="/image-inspection">画像チェック</a>
     </nav>
   </header>
   <main>
@@ -972,17 +919,6 @@ def render_image_auction_analysis_form_body(form_values: dict[str, str]) -> str:
 
 <label for="item_description">商品説明・補足 任意</label>
 <textarea id="item_description" name="item_description" placeholder="サイズ感、購入時期、付属品、ダメージなど">{escape(form_values.get("item_description", ""))}</textarea>"""
-
-
-def render_image_inspection_form_body() -> str:
-    angle_items = "".join(f"<li>{escape(angle)}</li>" for angle in RECOMMENDED_PHOTO_ANGLES)
-    return f"""<label for="item_images">商品写真</label>
-<input id="item_images" name="item_images" type="file" accept="image/*" multiple required>
-<p class="hint">推奨{len(RECOMMENDED_PHOTO_ANGLES)}枚 / 最大{MAX_IMAGES}枚。足りない場合も解析できますが、候補の確度が下がります。</p>
-<div class="photo-guide">
-  <strong>推奨アングル</strong>
-  <ul>{angle_items}</ul>
-</div>"""
 
 
 def render_select(name: str, options: list[str], selected: str) -> str:
@@ -1091,58 +1027,6 @@ def render_image_auction_analysis_result(
 """
 
 
-def render_image_inspection_result(
-    image_names: list[str],
-    inspection: ImageInspectionResponse | None,
-    error: str | None,
-) -> str:
-    if error:
-        return f"<h2>Image inspection failed</h2><div class=\"warning\">{escape(error)}</div>"
-    if not inspection:
-        return """<h2>How this works</h2>
-<p>画像からブランド候補と見える範囲の状態を推定します。価格計算・真贋判定・最終査定は行いません。</p>
-<p class="small">写真だけでは判断できない箇所があるため、結果はスタッフ確認のための参考情報です。</p>"""
-
-    uploaded = ", ".join(escape(name) for name in image_names[:6]) or "uploaded images"
-    candidates = "\n".join(
-        f"""<div class="comparable">
-  <strong>{escape(candidate.brand)}</strong> <span class="small">{candidate.confidence:.0%}</span>
-  <div class="small">{escape(candidate.evidence)}</div>
-</div>"""
-        for candidate in inspection.brand_candidates
-    )
-    model_candidates = "\n".join(
-        f"""<div class="comparable">
-  <strong>{escape(candidate.brand)} {escape(candidate.model)}</strong> <span class="small">{candidate.confidence:.0%}</span>
-  <div class="small">{escape(candidate.evidence)}</div>
-  {render_feature_tags(candidate.distinguishing_features)}
-</div>"""
-        for candidate in inspection.model_candidates
-    )
-    signals = render_text_list(inspection.visible_signals, "見える状態シグナルはありません。")
-    missing = render_text_list(inspection.missing_photo_angles, "追加で必要な写真はありません。")
-    warnings = render_text_list(inspection.warnings, "注意事項はありません。")
-    return f"""
-<h2>Image inspection result</h2>
-<div class="warning">解析画像: {uploaded}</div>
-<div class="grid">
-  <div class="metric"><span>商品状態</span><b>{escape(inspection.condition_status)}</b><small>Confidence {inspection.condition_confidence:.0%}</small></div>
-  <div class="metric"><span>ブランド候補</span><b>{len(inspection.brand_candidates):,}件</b><small>写真上の表示・形状から推定</small></div>
-  <div class="metric"><span>判定範囲</span><b>参考</b><small>真贋・最終査定ではありません</small></div>
-</div>
-<h2>Brand candidates</h2>
-{candidates}
-<h2>Model candidates</h2>
-{model_candidates or '<p>モデル候補は写真から十分に確認できませんでした。</p>'}
-<h2>Visible signals</h2>
-{signals}
-<h2>Missing photos</h2>
-{missing}
-<h2>Warnings</h2>
-{warnings}
-"""
-
-
 def render_image_analysis_summary(
     image_names: list[str],
     response: ImageAuctionAnalysisResponse,
@@ -1172,13 +1056,6 @@ def render_compact_model_candidates(inspection: ImageInspectionResponse) -> str:
         for candidate in inspection.model_candidates[:3]
     )
     return rows
-
-
-def render_feature_tags(values: list[str]) -> str:
-    if not values:
-        return ""
-    tags = "".join(f"<span class=\"tag\">{escape(value)}</span>" for value in values[:6])
-    return f"<div class=\"tags\">{tags}</div>"
 
 
 def render_text_list(values: list[str], empty_text: str) -> str:
