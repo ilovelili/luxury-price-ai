@@ -159,3 +159,27 @@ class AuctionAnalysisResponse(BaseModel):
     window_trend: list[AuctionWindowPoint]
     record_count: int
     records: list[AuctionRecord]
+
+
+class BrandCandidate(BaseModel):
+    brand: str
+    confidence: float = Field(ge=0.0, le=1.0)
+    evidence: str
+
+
+class ModelCandidate(BaseModel):
+    brand: str
+    model: str
+    confidence: float = Field(ge=0.0, le=1.0)
+    evidence: str
+    distinguishing_features: list[str] = Field(default_factory=list)
+
+
+class ImageInspectionResponse(BaseModel):
+    brand_candidates: list[BrandCandidate]
+    model_candidates: list[ModelCandidate] = Field(default_factory=list)
+    condition_status: str
+    condition_confidence: float = Field(ge=0.0, le=1.0)
+    visible_signals: list[str]
+    missing_photo_angles: list[str]
+    warnings: list[str]

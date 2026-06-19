@@ -13,10 +13,12 @@ from luxury_price_ai.intake import build_price_request_from_form
 from luxury_price_ai.models import (
     AuctionAnalysisRequest,
     AuctionAnalysisResponse,
+    ImageInspectionResponse,
     PriceEstimateRequest,
     PriceEstimateResponse,
 )
 from luxury_price_ai.storage import DatabaseConfigError, PostgresStore
+from luxury_price_ai.vision import VisionConfigError, VisionInputError, inspect_luxury_images
 
 app = FastAPI(title="Auction Sales Analysis", version="0.1.0")
 
@@ -198,6 +200,45 @@ def submit_ai_price_appraisal_form(
     )
 
 
+@app.get("/image-inspection", response_class=HTMLResponse, include_in_schema=False)
+def image_inspection_page() -> HTMLResponse:
+    return HTMLResponse(render_image_inspection_page())
+
+
+@app.post("/image-inspection", response_class=HTMLResponse, include_in_schema=False)
+def submit_image_inspection_form(
+    item_images: list[UploadFile] = File(default=[]),
+) -> HTMLResponse:
+    try:
+        response = run_image_inspection(item_images)
+    except HTTPException as exc:
+        return HTMLResponse(
+            render_image_inspection_page(error=str(exc.detail)),
+            status_code=exc.status_code,
+        )
+    image_names = [
+        image.filename
+        for image in item_images
+        if image.filename
+    ]
+    return HTMLResponse(
+        render_image_inspection_page(
+            image_names=image_names,
+            inspection=response,
+        )
+    )
+
+
+@app.post("/image-inspection/analyze", response_model=ImageInspectionResponse)
+def image_inspection_analyze(
+    item_images: list[UploadFile] = File(default=[]),
+    x_api_key: str | None = Header(default=None),
+) -> ImageInspectionResponse:
+    settings = get_settings()
+    require_api_key(settings.app_api_key, x_api_key)
+    return run_image_inspection(item_images)
+
+
 @app.post("/price-estimate", response_model=PriceEstimateResponse)
 def price_estimate(
     request: PriceEstimateRequest,
@@ -250,6 +291,17 @@ def run_auction_analysis(request: AuctionAnalysisRequest) -> AuctionAnalysisResp
         raise HTTPException(status_code=500, detail=f"database query failed: {exc}") from exc
 
     return analyze_auction_sales(request, candidates)
+
+
+def run_image_inspection(images: list[UploadFile]) -> ImageInspectionResponse:
+    try:
+        return inspect_luxury_images(images, get_settings())
+    except VisionInputError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except VisionConfigError as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"image inspection failed: {exc}") from exc
 
 
 def require_api_key(expected: str | None, provided: str | None) -> None:
@@ -305,6 +357,27 @@ def render_ai_price_page(
     )
 
 
+def render_image_inspection_page(
+    image_names: list[str] | None = None,
+    inspection: ImageInspectionResponse | None = None,
+    error: str | None = None,
+) -> str:
+    image_names = image_names or []
+    result = render_image_inspection_result(image_names, inspection, error)
+    return render_page_shell(
+        form_values={},
+        result=result,
+        active_page="image",
+        page_title="Image Inspection",
+        heading="Image Inspection",
+        lede="商品写真からブランド候補と見える範囲の状態を確認します。結果は参考情報です。",
+        form_action="/image-inspection",
+        submit_label="画像をチェックする",
+        show_image_upload=True,
+        form_body=render_image_inspection_form_body(),
+    )
+
+
 def render_page_shell(
     *,
     form_values: dict[str, str],
@@ -316,10 +389,16 @@ def render_page_shell(
     form_action: str,
     submit_label: str,
     show_image_upload: bool,
+    form_body: str | None = None,
 ) -> str:
     analysis_active = " active" if active_page == "analysis" else ""
     ai_active = " active" if active_page == "ai" else ""
+    image_active = " active" if active_page == "image" else ""
     image_upload = render_image_upload_control() if show_image_upload else ""
+    controls = form_body if form_body is not None else render_appraisal_form_body(
+        form_values=form_values,
+        image_upload=image_upload,
+    )
     return f"""<!doctype html>
 <html lang="ja">
 <head>
@@ -584,6 +663,7 @@ def render_page_shell(
     <nav>
       <a class="{analysis_active}" href="/auction-analysis">落札記録分析</a>
       <a class="{ai_active}" href="/ai-price-appraisal">AI価格査定</a>
+      <a class="{image_active}" href="/image-inspection">画像チェック</a>
     </nav>
   </header>
   <main>
@@ -591,29 +671,7 @@ def render_page_shell(
       <h1>{escape(heading)}</h1>
       <p class="lede">{escape(lede)}</p>
       <form action="{escape(form_action)}" method="post" enctype="multipart/form-data">
-        <label for="item_category">カテゴリ</label>
-        {render_select("item_category", CATEGORY_OPTIONS, form_values.get("item_category", "ブランドバッグ"))}
-
-        <label for="brand">ブランド</label>
-        {render_select("brand", BRAND_OPTIONS, form_values.get("brand", "CHANEL"))}
-
-        <label for="item_shape">アイテム種別・形状</label>
-        {render_select("item_shape", SHAPE_OPTIONS, form_values.get("item_shape", "ショルダーバッグ"))}
-
-        <label for="item_name">アイテム名・型番</label>
-        <input id="item_name" name="item_name" type="text" required placeholder="例: マトラッセ キャビアスキン" value="{escape(form_values.get("item_name", ""))}">
-
-        <label for="item_color">カラー</label>
-        <input id="item_color" name="item_color" type="text" placeholder="例: 黒 / ゴールド金具" value="{escape(form_values.get("item_color", ""))}">
-
-        <label for="condition_status">状態</label>
-        {render_select("condition_status", CONDITION_OPTIONS, form_values.get("condition_status", "使用感少ない"))}
-
-        <label for="item_description">商品説明・補足</label>
-        <textarea id="item_description" name="item_description" placeholder="サイズ感、購入時期、付属品、ダメージなど">{escape(form_values.get("item_description", ""))}</textarea>
-
-        {image_upload}
-
+        {controls}
         <button type="submit">{escape(submit_label)}</button>
       </form>
     </section>
@@ -622,7 +680,38 @@ def render_page_shell(
     </section>
   </main>
 </body>
-</html>"""
+	</html>"""
+
+
+def render_appraisal_form_body(form_values: dict[str, str], image_upload: str) -> str:
+    return f"""<label for="item_category">カテゴリ</label>
+{render_select("item_category", CATEGORY_OPTIONS, form_values.get("item_category", "ブランドバッグ"))}
+
+<label for="brand">ブランド</label>
+{render_select("brand", BRAND_OPTIONS, form_values.get("brand", "CHANEL"))}
+
+<label for="item_shape">アイテム種別・形状</label>
+{render_select("item_shape", SHAPE_OPTIONS, form_values.get("item_shape", "ショルダーバッグ"))}
+
+<label for="item_name">アイテム名・型番</label>
+<input id="item_name" name="item_name" type="text" required placeholder="例: マトラッセ キャビアスキン" value="{escape(form_values.get("item_name", ""))}">
+
+<label for="item_color">カラー</label>
+<input id="item_color" name="item_color" type="text" placeholder="例: 黒 / ゴールド金具" value="{escape(form_values.get("item_color", ""))}">
+
+<label for="condition_status">状態</label>
+{render_select("condition_status", CONDITION_OPTIONS, form_values.get("condition_status", "使用感少ない"))}
+
+<label for="item_description">商品説明・補足</label>
+<textarea id="item_description" name="item_description" placeholder="サイズ感、購入時期、付属品、ダメージなど">{escape(form_values.get("item_description", ""))}</textarea>
+
+{image_upload}"""
+
+
+def render_image_inspection_form_body() -> str:
+    return """<label for="item_images">商品写真</label>
+<input id="item_images" name="item_images" type="file" accept="image/*" multiple required>
+<p class="hint">正面、ロゴ/刻印、四つ角、金具、内側、ダメージ箇所があると判断しやすくなります。</p>"""
 
 
 def render_select(name: str, options: list[str], selected: str) -> str:
@@ -703,6 +792,72 @@ def render_ai_price_result(
 <h2>Comparable sales</h2>
 {comparables or '<p>No comparable sales found.</p>'}
 """
+
+
+def render_image_inspection_result(
+    image_names: list[str],
+    inspection: ImageInspectionResponse | None,
+    error: str | None,
+) -> str:
+    if error:
+        return f"<h2>Image inspection failed</h2><div class=\"warning\">{escape(error)}</div>"
+    if not inspection:
+        return """<h2>How this works</h2>
+<p>画像からブランド候補と見える範囲の状態を推定します。価格計算・真贋判定・最終査定は行いません。</p>
+<p class="small">写真だけでは判断できない箇所があるため、結果はスタッフ確認のための参考情報です。</p>"""
+
+    uploaded = ", ".join(escape(name) for name in image_names[:6]) or "uploaded images"
+    candidates = "\n".join(
+        f"""<div class="comparable">
+  <strong>{escape(candidate.brand)}</strong> <span class="small">{candidate.confidence:.0%}</span>
+  <div class="small">{escape(candidate.evidence)}</div>
+</div>"""
+        for candidate in inspection.brand_candidates
+    )
+    model_candidates = "\n".join(
+        f"""<div class="comparable">
+  <strong>{escape(candidate.brand)} {escape(candidate.model)}</strong> <span class="small">{candidate.confidence:.0%}</span>
+  <div class="small">{escape(candidate.evidence)}</div>
+  {render_feature_tags(candidate.distinguishing_features)}
+</div>"""
+        for candidate in inspection.model_candidates
+    )
+    signals = render_text_list(inspection.visible_signals, "見える状態シグナルはありません。")
+    missing = render_text_list(inspection.missing_photo_angles, "追加で必要な写真はありません。")
+    warnings = render_text_list(inspection.warnings, "注意事項はありません。")
+    return f"""
+<h2>Image inspection result</h2>
+<div class="warning">解析画像: {uploaded}</div>
+<div class="grid">
+  <div class="metric"><span>商品状態</span><b>{escape(inspection.condition_status)}</b><small>Confidence {inspection.condition_confidence:.0%}</small></div>
+  <div class="metric"><span>ブランド候補</span><b>{len(inspection.brand_candidates):,}件</b><small>写真上の表示・形状から推定</small></div>
+  <div class="metric"><span>判定範囲</span><b>参考</b><small>真贋・最終査定ではありません</small></div>
+</div>
+<h2>Brand candidates</h2>
+{candidates}
+<h2>Model candidates</h2>
+{model_candidates or '<p>モデル候補は写真から十分に確認できませんでした。</p>'}
+<h2>Visible signals</h2>
+{signals}
+<h2>Missing photos</h2>
+{missing}
+<h2>Warnings</h2>
+{warnings}
+"""
+
+
+def render_feature_tags(values: list[str]) -> str:
+    if not values:
+        return ""
+    tags = "".join(f"<span class=\"tag\">{escape(value)}</span>" for value in values[:6])
+    return f"<div class=\"tags\">{tags}</div>"
+
+
+def render_text_list(values: list[str], empty_text: str) -> str:
+    if not values:
+        return f"<p>{escape(empty_text)}</p>"
+    items = "".join(f"<li>{escape(value)}</li>" for value in values)
+    return f"<ul>{items}</ul>"
 
 
 def render_normalized_request(request: AuctionAnalysisRequest | PriceEstimateRequest) -> str:

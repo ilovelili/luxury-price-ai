@@ -10,6 +10,8 @@ class Settings:
     margin_rate: float
     risk_discount_rate: float
     app_api_key: str | None
+    openai_api_key: str | None
+    openai_vision_model: str
     dify_api_key: str | None
     dify_base_url: str
     dify_user: str
@@ -25,6 +27,8 @@ def get_settings() -> Settings:
         margin_rate=float(os.getenv("PRICE_MARGIN_RATE", "0.25")),
         risk_discount_rate=float(os.getenv("PRICE_RISK_DISCOUNT_RATE", "0.05")),
         app_api_key=os.getenv("APP_API_KEY"),
+        openai_api_key=os.getenv("OPENAI_API_KEY"),
+        openai_vision_model=os.getenv("OPENAI_VISION_MODEL", "gpt-5.5"),
         dify_api_key=os.getenv("DIFY_API_KEY"),
         dify_base_url=os.getenv("DIFY_BASE_URL", "https://api.dify.ai/v1").rstrip("/"),
         dify_user=os.getenv("DIFY_USER", "luxury-price-appraisal-web"),

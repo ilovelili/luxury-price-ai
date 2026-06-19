@@ -153,6 +153,13 @@ PRICE_MARGIN_RATE=0.25
 PRICE_RISK_DISCOUNT_RATE=0.05
 ```
 
+Optional `/image-inspection` environment variables:
+
+```sh
+OPENAI_API_KEY=sk-replace-with-your-openai-api-key
+OPENAI_VISION_MODEL=gpt-5.5
+```
+
 `/health` is public for Render health checks. `/auction-analysis` and `/price-estimate` require:
 
 ```http
@@ -168,7 +175,7 @@ If using the analysis endpoint from Dify or another tool, configure the HTTP req
 
 ## Custom Form
 
-The public `/auction-analysis` form is owned by this repo for a cleaner TRUNK-style intake UX. It calls the local analysis flow and shows matching auction records, summary statistics, charts, and recent movement. `/ai-price-appraisal` remains available for automated price-range appraisal.
+The public `/auction-analysis` form is owned by this repo for a cleaner TRUNK-style intake UX. It calls the local analysis flow and shows matching auction records, summary statistics, charts, and recent movement. `/ai-price-appraisal` remains available for automated price-range appraisal. `/image-inspection` accepts uploaded photos and returns AI-suggested brand and visible condition signals.
 
 Current form inputs:
 
@@ -181,4 +188,4 @@ Current form inputs:
 - `condition_status`
 - `item_photos`
 
-Images are received for staff review context, but they do not affect the analysis numbers.
+Images are received for staff review context or `/image-inspection`, but they do not affect auction analysis numbers.
