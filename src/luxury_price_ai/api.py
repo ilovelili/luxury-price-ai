@@ -18,7 +18,13 @@ from luxury_price_ai.models import (
     PriceEstimateResponse,
 )
 from luxury_price_ai.storage import DatabaseConfigError, PostgresStore
-from luxury_price_ai.vision import VisionConfigError, VisionInputError, inspect_luxury_images
+from luxury_price_ai.vision import (
+    MAX_IMAGES,
+    RECOMMENDED_PHOTO_ANGLES,
+    VisionConfigError,
+    VisionInputError,
+    inspect_luxury_images,
+)
 
 app = FastAPI(title="Auction Sales Analysis", version="0.1.0")
 
@@ -577,6 +583,24 @@ def render_page_shell(
       padding: 12px;
       margin-bottom: 14px;
     }}
+    .photo-guide {{
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: var(--panel-2);
+      color: var(--muted);
+      margin-top: 10px;
+      padding: 12px;
+      font-size: 13px;
+    }}
+    .photo-guide strong {{
+      color: var(--ink);
+      display: block;
+      margin-bottom: 6px;
+    }}
+    .photo-guide ul {{
+      margin: 0;
+      padding-left: 18px;
+    }}
     .comparable {{
       border-top: 1px solid var(--line);
       padding: 12px 0;
@@ -709,9 +733,14 @@ def render_appraisal_form_body(form_values: dict[str, str], image_upload: str) -
 
 
 def render_image_inspection_form_body() -> str:
-    return """<label for="item_images">商品写真</label>
+    angle_items = "".join(f"<li>{escape(angle)}</li>" for angle in RECOMMENDED_PHOTO_ANGLES)
+    return f"""<label for="item_images">商品写真</label>
 <input id="item_images" name="item_images" type="file" accept="image/*" multiple required>
-<p class="hint">正面、ロゴ/刻印、四つ角、金具、内側、ダメージ箇所があると判断しやすくなります。</p>"""
+<p class="hint">推奨{len(RECOMMENDED_PHOTO_ANGLES)}枚 / 最大{MAX_IMAGES}枚。足りない場合も解析できますが、候補の確度が下がります。</p>
+<div class="photo-guide">
+  <strong>推奨アングル</strong>
+  <ul>{angle_items}</ul>
+</div>"""
 
 
 def render_select(name: str, options: list[str], selected: str) -> str:

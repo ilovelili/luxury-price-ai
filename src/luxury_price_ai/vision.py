@@ -22,6 +22,14 @@ ALLOWED_CONDITION_STATUS = {
     "不明",
 }
 DEFAULT_WARNING = "画像解析は参考情報です。写真だけで真贋や最終状態を断定しません。"
+RECOMMENDED_PHOTO_ANGLES = [
+    "正面全体",
+    "背面全体",
+    "ロゴ・刻印・ブランド表示",
+    "四つ角・底面・フチ",
+    "金具・ファスナー・チェーン",
+    "内側・シリアル/刻印・ダメージ箇所",
+]
 
 
 class VisionConfigError(RuntimeError):
@@ -110,6 +118,11 @@ Return JSON only. Do not wrap it in Markdown.
 Infer likely brand, product line/model, and visible condition status from the images. Use only visible evidence. Do not claim authenticity or final appraisal certainty.
 
 For model_candidates, identify likely luxury resale model/line names such as CHANEL Classic Flap, CHANEL Boy, CHANEL 19, CHANEL Gabrielle, CHANEL Matelasse, LOUIS VUITTON Neverfull, HERMES Kelly, HERMES Birkin, etc. Include exact SKU/reference only when it is visibly readable. If exact SKU/reference is not visible, use the closest known line/model name and mention that the exact SKU needs serial/reference or measurements.
+
+Preferred photo set is 6 images/angles:
+{chr(10).join(f"- {angle}" for angle in RECOMMENDED_PHOTO_ANGLES)}
+
+Use missing_photo_angles to list important missing angles from that set, preferably in Japanese. Do not require all angles for a result, but lower confidence when key angles are missing.
 
 Allowed condition_status values: {statuses}
 

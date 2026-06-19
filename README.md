@@ -189,3 +189,14 @@ Current form inputs:
 - `item_photos`
 
 Images are received for staff review context or `/image-inspection`, but they do not affect auction analysis numbers.
+
+For `/image-inspection`, the recommended upload is 6 photos:
+
+- Front full view
+- Back full view
+- Logo, stamp, or visible brand mark
+- Corners, bottom, and edges
+- Hardware, zipper, chain, or clasp
+- Interior, serial/stamp, and visible damage areas
+
+Fewer photos are accepted, but missing angles are returned as part of the inspection result.
