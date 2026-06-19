@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+from dataclasses import dataclass
 import json
 from typing import Any
 
@@ -40,7 +41,21 @@ class VisionInputError(ValueError):
     pass
 
 
+@dataclass(frozen=True)
+class ImagePayload:
+    filename: str
+    content_type: str
+    content: bytes
+
+
 def inspect_luxury_images(images: list[UploadFile], settings: Settings) -> ImageInspectionResponse:
+    return inspect_luxury_image_payloads(upload_files_to_payloads(images), settings)
+
+
+def inspect_luxury_image_payloads(
+    images: list[ImagePayload],
+    settings: Settings,
+) -> ImageInspectionResponse:
     if not settings.openai_api_key:
         raise VisionConfigError("OPENAI_API_KEY is required for image inspection")
 
@@ -75,11 +90,28 @@ def inspect_luxury_images(images: list[UploadFile], settings: Settings) -> Image
     return parse_inspection_response(response.json())
 
 
-def prepare_image_inputs(images: list[UploadFile]) -> list[dict[str, str]]:
+def upload_files_to_payloads(images: list[UploadFile]) -> list[ImagePayload]:
+    payloads = []
+    for image in images:
+        if not image.filename and not image.content_type:
+            continue
+        content = image.file.read()
+        image.file.seek(0)
+        payloads.append(
+            ImagePayload(
+                filename=image.filename or "image",
+                content_type=image.content_type or "",
+                content=content,
+            )
+        )
+    return payloads
+
+
+def prepare_image_inputs(images: list[ImagePayload]) -> list[dict[str, str]]:
     valid_images = [
         image
         for image in images
-        if image.filename or image.content_type
+        if image.filename or image.content_type or image.content
     ]
     if not valid_images:
         raise VisionInputError("画像を1枚以上アップロードしてください")
@@ -92,8 +124,7 @@ def prepare_image_inputs(images: list[UploadFile]) -> list[dict[str, str]]:
         if not content_type.startswith("image/"):
             raise VisionInputError("画像ファイルのみアップロードできます")
 
-        content = image.file.read()
-        image.file.seek(0)
+        content = image.content
         if not content:
             raise VisionInputError("空の画像ファイルは解析できません")
         if len(content) > MAX_IMAGE_BYTES:

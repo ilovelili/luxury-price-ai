@@ -1,10 +1,14 @@
 from __future__ import annotations
 
+import base64
 from html import escape
 import hmac
+import mimetypes
+from typing import Any
 
 from fastapi import FastAPI, File, Form, Header, HTTPException, UploadFile
 from fastapi.responses import HTMLResponse, RedirectResponse
+import httpx
 
 from luxury_price_ai.analysis import analyze_auction_sales
 from luxury_price_ai.config import get_settings
@@ -13,6 +17,8 @@ from luxury_price_ai.intake import build_price_request_from_form
 from luxury_price_ai.models import (
     AuctionAnalysisRequest,
     AuctionAnalysisResponse,
+    DifyFileReference,
+    DifyImageInspectionRequest,
     ImageInspectionResponse,
     PriceEstimateRequest,
     PriceEstimateResponse,
@@ -21,8 +27,10 @@ from luxury_price_ai.storage import DatabaseConfigError, PostgresStore
 from luxury_price_ai.vision import (
     MAX_IMAGES,
     RECOMMENDED_PHOTO_ANGLES,
+    ImagePayload,
     VisionConfigError,
     VisionInputError,
+    inspect_luxury_image_payloads,
     inspect_luxury_images,
 )
 
@@ -245,6 +253,17 @@ def image_inspection_analyze(
     return run_image_inspection(item_images)
 
 
+@app.post("/image-inspection/analyze-dify", response_model=ImageInspectionResponse)
+def image_inspection_analyze_dify(
+    request: DifyImageInspectionRequest,
+    x_api_key: str | None = Header(default=None),
+) -> ImageInspectionResponse:
+    settings = get_settings()
+    require_api_key(settings.app_api_key, x_api_key)
+    payloads = resolve_dify_image_payloads(request, settings.dify_api_key)
+    return run_image_inspection_payloads(payloads)
+
+
 @app.post("/price-estimate", response_model=PriceEstimateResponse)
 def price_estimate(
     request: PriceEstimateRequest,
@@ -308,6 +327,111 @@ def run_image_inspection(images: list[UploadFile]) -> ImageInspectionResponse:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"image inspection failed: {exc}") from exc
+
+
+def run_image_inspection_payloads(images: list[ImagePayload]) -> ImageInspectionResponse:
+    try:
+        return inspect_luxury_image_payloads(images, get_settings())
+    except VisionInputError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except VisionConfigError as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"image inspection failed: {exc}") from exc
+
+
+def resolve_dify_image_payloads(
+    request: DifyImageInspectionRequest,
+    dify_api_key: str | None,
+) -> list[ImagePayload]:
+    references = [
+        *request.item_images,
+        *request.item_photos,
+        *request.files,
+    ]
+    payloads = []
+    for reference in references:
+        payload = image_payload_from_dify_reference(reference, dify_api_key)
+        if payload is not None:
+            payloads.append(payload)
+    if not payloads:
+        raise HTTPException(status_code=400, detail="Difyから画像ファイルを取得できませんでした")
+    return payloads
+
+
+def image_payload_from_dify_reference(
+    reference: DifyFileReference,
+    dify_api_key: str | None,
+) -> ImagePayload | None:
+    data = reference.model_dump()
+    url = first_string(
+        data,
+        "url",
+        "remote_url",
+        "download_url",
+        "signed_url",
+        "preview_url",
+    )
+    filename = first_string(data, "filename", "name") or "dify-image"
+    content_type = first_string(data, "mime_type", "content_type") or guess_image_content_type(filename)
+
+    if url and url.startswith("data:"):
+        return image_payload_from_data_url(url, filename, content_type)
+    if url and url.startswith(("http://", "https://")):
+        return download_image_payload(url, filename, content_type, dify_api_key)
+    return None
+
+
+def image_payload_from_data_url(
+    url: str,
+    filename: str,
+    fallback_content_type: str,
+) -> ImagePayload:
+    header, _, encoded = url.partition(",")
+    if not encoded:
+        raise HTTPException(status_code=400, detail="Dify画像data URLが不正です")
+    content_type = fallback_content_type
+    if header.startswith("data:") and ";" in header:
+        content_type = header.removeprefix("data:").split(";", 1)[0]
+    return ImagePayload(
+        filename=filename,
+        content_type=content_type,
+        content=base64.b64decode(encoded),
+    )
+
+
+def download_image_payload(
+    url: str,
+    filename: str,
+    fallback_content_type: str,
+    dify_api_key: str | None,
+) -> ImagePayload:
+    headers = {}
+    if dify_api_key and "dify" in url:
+        headers["Authorization"] = f"Bearer {dify_api_key}"
+    with httpx.Client(timeout=30, follow_redirects=True) as client:
+        response = client.get(url, headers=headers)
+    if response.status_code >= 400:
+        raise HTTPException(status_code=400, detail=f"Dify画像を取得できませんでした: HTTP {response.status_code}")
+    content_type = response.headers.get("content-type", "").split(";", 1)[0] or fallback_content_type
+    return ImagePayload(
+        filename=filename,
+        content_type=content_type,
+        content=response.content,
+    )
+
+
+def first_string(data: dict[str, Any], *keys: str) -> str | None:
+    for key in keys:
+        value = data.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return None
+
+
+def guess_image_content_type(filename: str) -> str:
+    guessed, _ = mimetypes.guess_type(filename)
+    return guessed or "image/jpeg"
 
 
 def require_api_key(expected: str | None, provided: str | None) -> None:

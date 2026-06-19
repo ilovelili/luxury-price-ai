@@ -183,3 +183,23 @@ class ImageInspectionResponse(BaseModel):
     visible_signals: list[str]
     missing_photo_angles: list[str]
     warnings: list[str]
+
+
+class DifyFileReference(BaseModel):
+    model_config = {"extra": "allow"}
+
+    url: str | None = None
+    remote_url: str | None = None
+    download_url: str | None = None
+    filename: str | None = None
+    name: str | None = None
+    mime_type: str | None = None
+    content_type: str | None = None
+    transfer_method: str | None = None
+    upload_file_id: str | None = None
+
+
+class DifyImageInspectionRequest(BaseModel):
+    item_images: list[DifyFileReference] = Field(default_factory=list)
+    item_photos: list[DifyFileReference] = Field(default_factory=list)
+    files: list[DifyFileReference] = Field(default_factory=list)
