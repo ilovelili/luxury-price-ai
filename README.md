@@ -117,8 +117,8 @@ curl -X POST http://127.0.0.1:8000/price-estimate \
 
 ## Stage 1 Behavior
 
-- The default `/auction-analysis` UI shows auction-record analysis.
-- The `/image-auction-analysis` UI combines image inspection, auction-record analysis, and automated price ranges in one staff-facing flow.
+- The default staff UI is `/image-auction-analysis`, titled Auction Sales Analysis.
+- The single staff page combines optional image inspection, explicit auction-record filters, summary statistics, charts, and automated price ranges.
 - Filters auction sales by explicit fields: brand/category from the database query, then shape/rank when provided.
 - Returns matching auction records, average, median, p25/p75, min/max, histogram bins, current 7-day versus previous 7-day movement, and a 3-month line chart of 7-day median windows.
 - Keeps `/price-estimate` available as a legacy deterministic comparable-sales endpoint.
@@ -160,13 +160,13 @@ OPENAI_API_KEY=sk-replace-with-your-openai-api-key
 OPENAI_VISION_MODEL=gpt-5.5
 ```
 
-`/health` is public for Render health checks. `/auction-analysis` and `/price-estimate` require:
+`/health` is public for Render health checks. JSON API endpoints such as `/auction-analysis`, `/image-auction-analysis`, and `/price-estimate` require:
 
 ```http
 X-API-Key: <APP_API_KEY>
 ```
 
-If using the analysis endpoint from Dify or another tool, configure the HTTP request node:
+If using the text-only analysis endpoint from Dify or another tool, configure the HTTP request node:
 
 - Method: `POST`
 - URL: `https://<render-service>.onrender.com/auction-analysis`
@@ -175,7 +175,7 @@ If using the analysis endpoint from Dify or another tool, configure the HTTP req
 
 ## Custom Form
 
-The public `/auction-analysis` form is owned by this repo for a cleaner TRUNK-style intake UX. It calls the local analysis flow and shows matching auction records, summary statistics, charts, and recent movement. `/image-auction-analysis` accepts uploaded photos, infers search conditions, and shows market/purchase price ranges with the same auction evidence. Image inspection remains available as an API for Dify/internal flows, but there is no separate image-check page in the staff UI.
+The public `/image-auction-analysis` form is owned by this repo for a cleaner TRUNK-style intake UX. It accepts optional uploaded photos, infers search conditions when photos are present, and shows matching auction records, summary statistics, charts, recent movement, and market/purchase price ranges. Image inspection remains available as an API for Dify/internal flows, but there is no separate image-check page in the staff UI.
 
 Current form inputs:
 

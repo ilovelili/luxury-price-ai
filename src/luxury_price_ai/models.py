@@ -162,7 +162,7 @@ class AuctionAnalysisResponse(BaseModel):
 
 
 class ImageAuctionAnalysisResponse(BaseModel):
-    inspection: "ImageInspectionResponse"
+    inspection: "ImageInspectionResponse | None" = None
     inferred_request: AuctionAnalysisRequest
     analysis: AuctionAnalysisResponse
     estimate: PriceEstimateResponse

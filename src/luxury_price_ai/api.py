@@ -95,20 +95,20 @@ def health() -> dict[str, str]:
 
 @app.get("/", include_in_schema=False)
 def index() -> RedirectResponse:
-    return RedirectResponse(url="/auction-analysis", status_code=302)
+    return RedirectResponse(url="/image-auction-analysis", status_code=302)
 
 
 @app.get("/appraisal", include_in_schema=False)
 def legacy_appraisal() -> RedirectResponse:
-    return RedirectResponse(url="/auction-analysis", status_code=302)
+    return RedirectResponse(url="/image-auction-analysis", status_code=302)
 
 
-@app.get("/auction-analysis", response_class=HTMLResponse, include_in_schema=False)
-def auction_analysis_page() -> HTMLResponse:
-    return HTMLResponse(render_analysis_page())
+@app.get("/auction-analysis", include_in_schema=False)
+def auction_analysis_page() -> RedirectResponse:
+    return RedirectResponse(url="/image-auction-analysis", status_code=302)
 
 
-@app.post("/auction-analysis/search", response_class=HTMLResponse, include_in_schema=False)
+@app.post("/auction-analysis/search", include_in_schema=False)
 def submit_auction_analysis_form(
     item_category: str = Form(...),
     brand: str = Form(...),
@@ -118,53 +118,8 @@ def submit_auction_analysis_form(
     item_color: str = Form(default=""),
     item_description: str = Form(default=""),
     item_images: list[UploadFile] = File(default=[]),
-) -> HTMLResponse:
-    form_values = {
-        "item_category": item_category,
-        "brand": brand,
-        "item_shape": item_shape,
-        "item_name": item_name,
-        "item_color": item_color,
-        "condition_status": condition_status,
-        "item_description": item_description,
-    }
-    base_request = build_price_request_from_form(
-        brand=brand,
-        item_category=item_category,
-        item_shape=item_shape,
-        item_name=item_name,
-        item_color=item_color,
-        condition_status=condition_status,
-        item_description=item_description,
-        limit=50,
-    )
-    request = AuctionAnalysisRequest.model_validate(
-        base_request.model_dump()
-    )
-    try:
-        response = run_auction_analysis(request)
-    except HTTPException as exc:
-        return HTMLResponse(
-                render_analysis_page(
-                form_values=form_values,
-                error=str(exc.detail),
-            ),
-            status_code=exc.status_code,
-        )
-
-    image_names = [
-        image.filename
-        for image in item_images
-        if image.filename
-    ]
-    return HTMLResponse(
-        render_analysis_page(
-            form_values=form_values,
-            image_names=image_names,
-            normalized_request=request,
-            analysis=response,
-        )
-    )
+) -> RedirectResponse:
+    return RedirectResponse(url="/image-auction-analysis", status_code=303)
 
 
 @app.get("/image-auction-analysis", response_class=HTMLResponse, include_in_schema=False)
@@ -350,6 +305,35 @@ def run_image_auction_analysis(
     condition_status: str = "",
     item_description: str = "",
 ) -> ImageAuctionAnalysisResponse:
+    if not has_uploaded_images(images):
+        base_request = build_price_request_from_form(
+            brand=brand,
+            item_category=item_category,
+            item_shape=item_shape,
+            item_name=item_name,
+            item_color=item_color,
+            condition_status=condition_status,
+            item_description=item_description,
+            limit=50,
+        )
+        request = AuctionAnalysisRequest.model_validate(base_request.model_dump())
+        analysis = run_auction_analysis(request)
+        estimate_request = PriceEstimateRequest.model_validate(
+            {
+                **request.model_dump(),
+                "limit": 20,
+            }
+        )
+        estimate = run_estimate(estimate_request)
+        return ImageAuctionAnalysisResponse(
+            inspection=None,
+            inferred_request=request,
+            analysis=analysis,
+            estimate=estimate,
+            confidence=estimate.confidence,
+            missing_inputs=estimate.missing_inputs,
+        )
+
     inspection = run_image_inspection(images)
     request = build_auction_request_from_image_inspection(
         inspection,
@@ -383,6 +367,10 @@ def run_image_auction_analysis(
         ),
         missing_inputs=missing_inputs,
     )
+
+
+def has_uploaded_images(images: list[UploadFile]) -> bool:
+    return any(image.filename or image.content_type for image in images)
 
 
 def run_image_inspection_payloads(images: list[ImagePayload]) -> ImageInspectionResponse:
@@ -497,29 +485,6 @@ def require_api_key(expected: str | None, provided: str | None) -> None:
         raise HTTPException(status_code=401, detail="invalid or missing API key")
 
 
-def render_analysis_page(
-    form_values: dict[str, str] | None = None,
-    image_names: list[str] | None = None,
-    normalized_request: AuctionAnalysisRequest | None = None,
-    analysis: AuctionAnalysisResponse | None = None,
-    error: str | None = None,
-) -> str:
-    image_names = image_names or []
-    form_values = form_values or {}
-    result = render_analysis_result(image_names, normalized_request, analysis, error)
-    return render_page_shell(
-        form_values=form_values,
-        result=result,
-        active_page="analysis",
-        page_title="Auction Sales Analysis",
-        heading="Auction Sales Analysis",
-        lede="条件に近い落札記録を検索し、中央値・平均値・直近の値動きを確認します。",
-        form_action="/auction-analysis/search",
-        submit_label="落札データを見る",
-        show_image_upload=False,
-    )
-
-
 def render_image_auction_analysis_page(
     form_values: dict[str, str] | None = None,
     image_names: list[str] | None = None,
@@ -532,12 +497,11 @@ def render_image_auction_analysis_page(
     return render_page_shell(
         form_values=form_values,
         result=result,
-        active_page="image_analysis",
-        page_title="Image Auction Analysis",
-        heading="Image Auction Analysis",
-        lede="商品写真から検索条件を補完し、EcoAuc/Ecoringの相場表を表示します。",
+        page_title="Auction Sales Analysis",
+        heading="Auction Sales Analysis",
+        lede="商品写真または入力条件からEcoAuc/Ecoringの相場表、価格レンジ、落札例を確認します。",
         form_action="/image-auction-analysis/search",
-        submit_label="画像から相場表を見る",
+        submit_label="相場表を見る",
         show_image_upload=False,
         form_body=render_image_auction_analysis_form_body(form_values),
     )
@@ -547,7 +511,6 @@ def render_page_shell(
     *,
     form_values: dict[str, str],
     result: str,
-    active_page: str,
     page_title: str,
     heading: str,
     lede: str,
@@ -556,8 +519,6 @@ def render_page_shell(
     show_image_upload: bool,
     form_body: str | None = None,
 ) -> str:
-    analysis_active = " active" if active_page == "analysis" else ""
-    image_analysis_active = " active" if active_page == "image_analysis" else ""
     image_upload = render_image_upload_control() if show_image_upload else ""
     controls = form_body if form_body is not None else render_appraisal_form_body(
         form_values=form_values,
@@ -842,10 +803,6 @@ def render_page_shell(
 <body>
   <header>
     <div class="brandmark">TRUNK</div>
-    <nav>
-      <a class="{analysis_active}" href="/auction-analysis">落札記録分析</a>
-      <a class="{image_analysis_active}" href="/image-auction-analysis">画像相場検索</a>
-    </nav>
   </header>
   <main>
     <section class="panel">
@@ -891,9 +848,9 @@ def render_appraisal_form_body(form_values: dict[str, str], image_upload: str) -
 
 def render_image_auction_analysis_form_body(form_values: dict[str, str]) -> str:
     angle_items = "".join(f"<li>{escape(angle)}</li>" for angle in RECOMMENDED_PHOTO_ANGLES)
-    return f"""<label for="item_images">商品写真</label>
-<input id="item_images" name="item_images" type="file" accept="image/*" multiple required>
-<p class="hint">画像からブランド・型・状態候補を読み取り、下の任意入力で補正できます。</p>
+    return f"""<label for="item_images">商品写真 任意</label>
+<input id="item_images" name="item_images" type="file" accept="image/*" multiple>
+<p class="hint">写真がある場合はブランド・型・状態候補を読み取り、写真なしの場合は下の入力条件で相場表を検索します。</p>
 <div class="photo-guide">
   <strong>推奨アングル</strong>
   <ul>{angle_items}</ul>
@@ -985,8 +942,8 @@ def render_image_auction_analysis_result(
         return f"<h2>Image auction analysis failed</h2><div class=\"warning\">{escape(error)}</div>"
     if not response:
         return """<h2>How this works</h2>
-<p>商品写真を解析してブランド・モデル・状態候補を検索条件に変換し、相場表DBから近い落札記録を表示します。</p>
-<p class="small">画像だけで真贋や最終査定額は断定しません。過去画像は保存せず、DB内の画像URLは比較証拠として表示します。</p>"""
+<p>商品写真または入力条件を検索条件に変換し、相場表DBから近い落札記録、相場統計、価格レンジを表示します。</p>
+<p class="small">画像だけで真贋や最終査定額は断定しません。写真なしでもブランドや形状などの入力条件だけで分析できます。</p>"""
 
     inspection = response.inspection
     analysis = response.analysis
@@ -999,8 +956,6 @@ def render_image_auction_analysis_result(
     trend = render_trend(analysis)
     charts = render_analysis_charts(analysis)
     records = "\n".join(render_auction_record(item) for item in analysis.records[:10])
-    brand_candidates = render_compact_brand_candidates(inspection)
-    model_candidates = render_compact_model_candidates(inspection)
     missing = render_text_list(response.missing_inputs, "追加で必要な情報はありません。")
     return f"""
 <h2>Image auction analysis result</h2>
@@ -1010,12 +965,10 @@ def render_image_auction_analysis_result(
   {market}
   {offer}
   <div class="metric"><span>Confidence</span><b>{response.confidence:.0%}</b><small>画像 + 相場表検索</small></div>
-  <div class="metric"><span>画像上の状態</span><b>{escape(inspection.condition_status)}</b><small>画像Confidence {inspection.condition_confidence:.0%}</small></div>
+  {render_condition_metric(inspection)}
   <div class="metric"><span>条件一致</span><b>{analysis.record_count:,}件</b><small>表示 {len(analysis.records):,}件</small></div>
 </div>
-<h2>Image-derived candidates</h2>
-{brand_candidates}
-{model_candidates}
+{render_image_candidates_section(inspection)}
 <h2>Missing inputs</h2>
 {missing}
 <h2>Market table</h2>
@@ -1027,14 +980,33 @@ def render_image_auction_analysis_result(
 """
 
 
+def render_image_candidates_section(inspection: ImageInspectionResponse | None) -> str:
+    if not inspection:
+        return ""
+    brand_candidates = render_compact_brand_candidates(inspection)
+    model_candidates = render_compact_model_candidates(inspection)
+    return f"""<h2>Image-derived candidates</h2>
+{brand_candidates}
+{model_candidates}
+"""
+
+
 def render_image_analysis_summary(
     image_names: list[str],
     response: ImageAuctionAnalysisResponse,
 ) -> str:
+    if not response.inspection:
+        return """<div class="warning">写真なしで分析しました。写真を追加するとブランド・型・状態候補を自動補完できます。</div>"""
     names = ", ".join(escape(name) for name in image_names[:6]) or "uploaded images"
     extra = "" if len(image_names) <= 6 else f" and {len(image_names) - 6} more"
     warnings = " / ".join(response.inspection.warnings[:2])
     return f"""<div class="warning">画像 {len(image_names)} 件を解析しました: {names}{extra}。{escape(warnings)}</div>"""
+
+
+def render_condition_metric(inspection: ImageInspectionResponse | None) -> str:
+    if not inspection:
+        return """<div class="metric"><span>画像上の状態</span><b>-</b><small>写真なし</small></div>"""
+    return f"""<div class="metric"><span>画像上の状態</span><b>{escape(inspection.condition_status)}</b><small>画像Confidence {inspection.condition_confidence:.0%}</small></div>"""
 
 
 def render_compact_brand_candidates(inspection: ImageInspectionResponse) -> str:
