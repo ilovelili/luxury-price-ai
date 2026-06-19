@@ -161,6 +161,15 @@ class AuctionAnalysisResponse(BaseModel):
     records: list[AuctionRecord]
 
 
+class ImageAuctionAnalysisResponse(BaseModel):
+    inspection: "ImageInspectionResponse"
+    inferred_request: AuctionAnalysisRequest
+    analysis: AuctionAnalysisResponse
+    estimate: PriceEstimateResponse
+    confidence: float
+    missing_inputs: list[str]
+
+
 class BrandCandidate(BaseModel):
     brand: str
     confidence: float = Field(ge=0.0, le=1.0)

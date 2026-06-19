@@ -118,11 +118,11 @@ curl -X POST http://127.0.0.1:8000/price-estimate \
 ## Stage 1 Behavior
 
 - The default `/auction-analysis` UI shows auction-record analysis.
-- The `/ai-price-appraisal` UI keeps the legacy AI price appraisal flow available from the nav.
+- The `/image-auction-analysis` UI combines image inspection, auction-record analysis, and automated price ranges in one staff-facing flow.
 - Filters auction sales by explicit fields: brand/category from the database query, then shape/rank when provided.
 - Returns matching auction records, average, median, p25/p75, min/max, histogram bins, current 7-day versus previous 7-day movement, and a 3-month line chart of 7-day median windows.
 - Keeps `/price-estimate` available as a legacy deterministic comparable-sales endpoint.
-- Images are collected for staff review context only and are not used in numeric analysis.
+- Image uploads can be used to infer search conditions for `/image-auction-analysis`; EcoAuc image URLs are shown as evidence links and are not downloaded or stored by this service.
 
 No ML training or image downloading is included in Stage 1.
 
@@ -175,7 +175,7 @@ If using the analysis endpoint from Dify or another tool, configure the HTTP req
 
 ## Custom Form
 
-The public `/auction-analysis` form is owned by this repo for a cleaner TRUNK-style intake UX. It calls the local analysis flow and shows matching auction records, summary statistics, charts, and recent movement. `/ai-price-appraisal` remains available for automated price-range appraisal. `/image-inspection` accepts uploaded photos and returns AI-suggested brand and visible condition signals.
+The public `/auction-analysis` form is owned by this repo for a cleaner TRUNK-style intake UX. It calls the local analysis flow and shows matching auction records, summary statistics, charts, and recent movement. `/image-auction-analysis` accepts uploaded photos, infers search conditions, and shows market/purchase price ranges with the same auction evidence. `/image-inspection` remains available for standalone photo review.
 
 Current form inputs:
 
@@ -188,7 +188,7 @@ Current form inputs:
 - `condition_status`
 - `item_photos`
 
-Images are received for staff review context or `/image-inspection`, but they do not affect auction analysis numbers.
+Images are received for staff review context or `/image-inspection`. In `/image-auction-analysis`, image-derived brand/model/condition signals are used to fill missing search conditions before the auction analysis and price-range calculation.
 
 For `/image-inspection`, the recommended upload is 6 photos:
 

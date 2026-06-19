@@ -13,12 +13,18 @@ import httpx
 from luxury_price_ai.analysis import analyze_auction_sales
 from luxury_price_ai.config import get_settings
 from luxury_price_ai.estimator import estimate_price
-from luxury_price_ai.intake import build_price_request_from_form
+from luxury_price_ai.intake import (
+    build_auction_request_from_image_inspection,
+    build_price_request_from_form,
+    image_analysis_confidence,
+    image_analysis_missing_inputs,
+)
 from luxury_price_ai.models import (
     AuctionAnalysisRequest,
     AuctionAnalysisResponse,
     DifyFileReference,
     DifyImageInspectionRequest,
+    ImageAuctionAnalysisResponse,
     ImageInspectionResponse,
     PriceEstimateRequest,
     PriceEstimateResponse,
@@ -162,18 +168,18 @@ def submit_auction_analysis_form(
     )
 
 
-@app.get("/ai-price-appraisal", response_class=HTMLResponse, include_in_schema=False)
-def ai_price_appraisal_page() -> HTMLResponse:
-    return HTMLResponse(render_ai_price_page())
+@app.get("/image-auction-analysis", response_class=HTMLResponse, include_in_schema=False)
+def image_auction_analysis_page() -> HTMLResponse:
+    return HTMLResponse(render_image_auction_analysis_page())
 
 
-@app.post("/ai-price-appraisal", response_class=HTMLResponse, include_in_schema=False)
-def submit_ai_price_appraisal_form(
-    item_category: str = Form(...),
-    brand: str = Form(...),
-    item_shape: str = Form(...),
-    item_name: str = Form(...),
-    condition_status: str = Form(...),
+@app.post("/image-auction-analysis/search", response_class=HTMLResponse, include_in_schema=False)
+def submit_image_auction_analysis_form(
+    item_category: str = Form(default=""),
+    brand: str = Form(default=""),
+    item_shape: str = Form(default=""),
+    item_name: str = Form(default=""),
+    condition_status: str = Form(default=""),
     item_color: str = Form(default=""),
     item_description: str = Form(default=""),
     item_images: list[UploadFile] = File(default=[]),
@@ -187,29 +193,37 @@ def submit_ai_price_appraisal_form(
         "condition_status": condition_status,
         "item_description": item_description,
     }
-    request = build_price_request_from_form(**form_values, limit=20)
-    try:
-        response = run_estimate(request)
-    except HTTPException as exc:
-        return HTMLResponse(
-            render_ai_price_page(
-                form_values=form_values,
-                error=str(exc.detail),
-            ),
-            status_code=exc.status_code,
-        )
-
     image_names = [
         image.filename
         for image in item_images
         if image.filename
     ]
+    try:
+        response = run_image_auction_analysis(
+            item_images,
+            brand=brand,
+            item_category=item_category,
+            item_shape=item_shape,
+            item_name=item_name,
+            item_color=item_color,
+            condition_status=condition_status,
+            item_description=item_description,
+        )
+    except HTTPException as exc:
+        return HTMLResponse(
+            render_image_auction_analysis_page(
+                form_values=form_values,
+                image_names=image_names,
+                error=str(exc.detail),
+            ),
+            status_code=exc.status_code,
+        )
+
     return HTMLResponse(
-        render_ai_price_page(
+        render_image_auction_analysis_page(
             form_values=form_values,
             image_names=image_names,
-            normalized_request=request,
-            estimate=response,
+            response=response,
         )
     )
 
@@ -284,6 +298,32 @@ def auction_analysis(
     return run_auction_analysis(request)
 
 
+@app.post("/image-auction-analysis", response_model=ImageAuctionAnalysisResponse)
+def image_auction_analysis(
+    item_category: str = Form(default=""),
+    brand: str = Form(default=""),
+    item_shape: str = Form(default=""),
+    item_name: str = Form(default=""),
+    condition_status: str = Form(default=""),
+    item_color: str = Form(default=""),
+    item_description: str = Form(default=""),
+    item_images: list[UploadFile] = File(default=[]),
+    x_api_key: str | None = Header(default=None),
+) -> ImageAuctionAnalysisResponse:
+    settings = get_settings()
+    require_api_key(settings.app_api_key, x_api_key)
+    return run_image_auction_analysis(
+        item_images,
+        brand=brand,
+        item_category=item_category,
+        item_shape=item_shape,
+        item_name=item_name,
+        item_color=item_color,
+        condition_status=condition_status,
+        item_description=item_description,
+    )
+
+
 def run_estimate(request: PriceEstimateRequest) -> PriceEstimateResponse:
     settings = get_settings()
     try:
@@ -327,6 +367,52 @@ def run_image_inspection(images: list[UploadFile]) -> ImageInspectionResponse:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"image inspection failed: {exc}") from exc
+
+
+def run_image_auction_analysis(
+    images: list[UploadFile],
+    *,
+    brand: str = "",
+    item_category: str = "",
+    item_shape: str = "",
+    item_name: str = "",
+    item_color: str = "",
+    condition_status: str = "",
+    item_description: str = "",
+) -> ImageAuctionAnalysisResponse:
+    inspection = run_image_inspection(images)
+    request = build_auction_request_from_image_inspection(
+        inspection,
+        brand=brand,
+        item_category=item_category,
+        item_shape=item_shape,
+        item_name=item_name,
+        item_color=item_color,
+        condition_status=condition_status,
+        item_description=item_description,
+    )
+    analysis = run_auction_analysis(request)
+    estimate_request = PriceEstimateRequest.model_validate(
+        {
+            **request.model_dump(),
+            "limit": 20,
+        }
+    )
+    estimate = run_estimate(estimate_request)
+    missing_inputs = image_analysis_missing_inputs(inspection, request)
+    return ImageAuctionAnalysisResponse(
+        inspection=inspection,
+        inferred_request=request,
+        analysis=analysis,
+        estimate=estimate,
+        confidence=image_analysis_confidence(
+            inspection,
+            request,
+            analysis.record_count,
+            missing_inputs,
+        ),
+        missing_inputs=missing_inputs,
+    )
 
 
 def run_image_inspection_payloads(images: list[ImagePayload]) -> ImageInspectionResponse:
@@ -464,26 +550,26 @@ def render_analysis_page(
     )
 
 
-def render_ai_price_page(
+def render_image_auction_analysis_page(
     form_values: dict[str, str] | None = None,
     image_names: list[str] | None = None,
-    normalized_request: PriceEstimateRequest | None = None,
-    estimate: PriceEstimateResponse | None = None,
+    response: ImageAuctionAnalysisResponse | None = None,
     error: str | None = None,
 ) -> str:
     image_names = image_names or []
     form_values = form_values or {}
-    result = render_ai_price_result(image_names, normalized_request, estimate, error)
+    result = render_image_auction_analysis_result(image_names, response, error)
     return render_page_shell(
         form_values=form_values,
         result=result,
-        active_page="ai",
-        page_title="AI Price Appraisal",
-        heading="AI Price Appraisal",
-        lede="類似落札データをスコアリングし、市場価格レンジと買取提示レンジを自動計算します。",
-        form_action="/ai-price-appraisal",
-        submit_label="AI査定レンジを見る",
-        show_image_upload=True,
+        active_page="image_analysis",
+        page_title="Image Auction Analysis",
+        heading="Image Auction Analysis",
+        lede="商品写真から検索条件を補完し、EcoAuc/Ecoringの相場表を表示します。",
+        form_action="/image-auction-analysis/search",
+        submit_label="画像から相場表を見る",
+        show_image_upload=False,
+        form_body=render_image_auction_analysis_form_body(form_values),
     )
 
 
@@ -522,7 +608,7 @@ def render_page_shell(
     form_body: str | None = None,
 ) -> str:
     analysis_active = " active" if active_page == "analysis" else ""
-    ai_active = " active" if active_page == "ai" else ""
+    image_analysis_active = " active" if active_page == "image_analysis" else ""
     image_active = " active" if active_page == "image" else ""
     image_upload = render_image_upload_control() if show_image_upload else ""
     controls = form_body if form_body is not None else render_appraisal_form_body(
@@ -810,7 +896,7 @@ def render_page_shell(
     <div class="brandmark">TRUNK</div>
     <nav>
       <a class="{analysis_active}" href="/auction-analysis">落札記録分析</a>
-      <a class="{ai_active}" href="/ai-price-appraisal">AI価格査定</a>
+      <a class="{image_analysis_active}" href="/image-auction-analysis">画像相場検索</a>
       <a class="{image_active}" href="/image-inspection">画像チェック</a>
     </nav>
   </header>
@@ -856,6 +942,38 @@ def render_appraisal_form_body(form_values: dict[str, str], image_upload: str) -
 {image_upload}"""
 
 
+def render_image_auction_analysis_form_body(form_values: dict[str, str]) -> str:
+    angle_items = "".join(f"<li>{escape(angle)}</li>" for angle in RECOMMENDED_PHOTO_ANGLES)
+    return f"""<label for="item_images">商品写真</label>
+<input id="item_images" name="item_images" type="file" accept="image/*" multiple required>
+<p class="hint">画像からブランド・型・状態候補を読み取り、下の任意入力で補正できます。</p>
+<div class="photo-guide">
+  <strong>推奨アングル</strong>
+  <ul>{angle_items}</ul>
+</div>
+
+<label for="item_category">カテゴリ 任意</label>
+{render_optional_select("item_category", CATEGORY_OPTIONS, form_values.get("item_category", ""))}
+
+<label for="brand">ブランド 任意</label>
+{render_optional_select("brand", BRAND_OPTIONS, form_values.get("brand", ""))}
+
+<label for="item_shape">アイテム種別・形状 任意</label>
+{render_optional_select("item_shape", SHAPE_OPTIONS, form_values.get("item_shape", ""))}
+
+<label for="item_name">アイテム名・型番 任意</label>
+<input id="item_name" name="item_name" type="text" placeholder="例: マトラッセ キャビアスキン" value="{escape(form_values.get("item_name", ""))}">
+
+<label for="item_color">カラー 任意</label>
+<input id="item_color" name="item_color" type="text" placeholder="例: 黒 / ゴールド金具" value="{escape(form_values.get("item_color", ""))}">
+
+<label for="condition_status">状態 任意</label>
+{render_optional_select("condition_status", CONDITION_OPTIONS, form_values.get("condition_status", ""))}
+
+<label for="item_description">商品説明・補足 任意</label>
+<textarea id="item_description" name="item_description" placeholder="サイズ感、購入時期、付属品、ダメージなど">{escape(form_values.get("item_description", ""))}</textarea>"""
+
+
 def render_image_inspection_form_body() -> str:
     angle_items = "".join(f"<li>{escape(angle)}</li>" for angle in RECOMMENDED_PHOTO_ANGLES)
     return f"""<label for="item_images">商品写真</label>
@@ -873,6 +991,14 @@ def render_select(name: str, options: list[str], selected: str) -> str:
         for option in options
     )
     return f'<select id="{escape(name)}" name="{escape(name)}" required>{option_html}</select>'
+
+
+def render_optional_select(name: str, options: list[str], selected: str) -> str:
+    option_html = '<option value="">画像から推定</option>\n' + "\n".join(
+        f'<option value="{escape(option)}"{selected_attr(option, selected)}>{escape(option)}</option>'
+        for option in options
+    )
+    return f'<select id="{escape(name)}" name="{escape(name)}">{option_html}</select>'
 
 
 def render_image_upload_control() -> str:
@@ -914,36 +1040,54 @@ def render_analysis_result(
 """
 
 
-def render_ai_price_result(
+def render_image_auction_analysis_result(
     image_names: list[str],
-    normalized_request: PriceEstimateRequest | None,
-    estimate: PriceEstimateResponse | None,
+    response: ImageAuctionAnalysisResponse | None,
     error: str | None,
 ) -> str:
     if error:
-        return f"<h2>AI estimate failed</h2><div class=\"warning\">{escape(error)}</div>"
-    if not estimate or not normalized_request:
+        return f"<h2>Image auction analysis failed</h2><div class=\"warning\">{escape(error)}</div>"
+    if not response:
         return """<h2>How this works</h2>
-<p>類似落札記録をスコアリングし、上位 comparable の p25 / median / p75 から価格レンジを出します。</p>
-<p class="small">こちらは自動査定ページです。初期表示は落札記録分析を推奨します。</p>"""
+<p>商品写真を解析してブランド・モデル・状態候補を検索条件に変換し、相場表DBから近い落札記録を表示します。</p>
+<p class="small">画像だけで真贋や最終査定額は断定しません。過去画像は保存せず、DB内の画像URLは比較証拠として表示します。</p>"""
 
-    normalized = render_normalized_request(normalized_request)
-    image_summary = render_image_summary(image_names)
+    inspection = response.inspection
+    analysis = response.analysis
+    estimate = response.estimate
+    normalized = render_normalized_request(response.inferred_request)
+    image_summary = render_image_analysis_summary(image_names, response)
     market = render_price_range("推定市場価格", estimate.market_price_jpy)
     offer = render_price_range("買取提示レンジ", estimate.purchase_offer_jpy)
-    missing = ", ".join(estimate.missing_inputs) if estimate.missing_inputs else "なし"
-    comparables = "\n".join(render_comparable(item) for item in estimate.comparables[:5])
+    stats = render_stats(analysis)
+    trend = render_trend(analysis)
+    charts = render_analysis_charts(analysis)
+    records = "\n".join(render_auction_record(item) for item in analysis.records[:10])
+    brand_candidates = render_compact_brand_candidates(inspection)
+    model_candidates = render_compact_model_candidates(inspection)
+    missing = render_text_list(response.missing_inputs, "追加で必要な情報はありません。")
     return f"""
-<h2>AI estimate result</h2>
-{normalized}
+<h2>Image auction analysis result</h2>
 {image_summary}
+{normalized}
 <div class="grid">
   {market}
   {offer}
-  <div class="metric"><span>Confidence</span><b>{estimate.confidence:.0%}</b><small>Missing: {escape(missing)}</small></div>
+  <div class="metric"><span>Confidence</span><b>{response.confidence:.0%}</b><small>画像 + 相場表検索</small></div>
+  <div class="metric"><span>画像上の状態</span><b>{escape(inspection.condition_status)}</b><small>画像Confidence {inspection.condition_confidence:.0%}</small></div>
+  <div class="metric"><span>条件一致</span><b>{analysis.record_count:,}件</b><small>表示 {len(analysis.records):,}件</small></div>
 </div>
-<h2>Comparable sales</h2>
-{comparables or '<p>No comparable sales found.</p>'}
+<h2>Image-derived candidates</h2>
+{brand_candidates}
+{model_candidates}
+<h2>Missing inputs</h2>
+{missing}
+<h2>Market table</h2>
+{stats}
+{trend}
+{charts}
+<h2>Auction records</h2>
+{records or '<p>No matching auction records found.</p>'}
 """
 
 
@@ -999,6 +1143,37 @@ def render_image_inspection_result(
 """
 
 
+def render_image_analysis_summary(
+    image_names: list[str],
+    response: ImageAuctionAnalysisResponse,
+) -> str:
+    names = ", ".join(escape(name) for name in image_names[:6]) or "uploaded images"
+    extra = "" if len(image_names) <= 6 else f" and {len(image_names) - 6} more"
+    warnings = " / ".join(response.inspection.warnings[:2])
+    return f"""<div class="warning">画像 {len(image_names)} 件を解析しました: {names}{extra}。{escape(warnings)}</div>"""
+
+
+def render_compact_brand_candidates(inspection: ImageInspectionResponse) -> str:
+    tags = "".join(
+        f"<span class=\"tag\">{escape(candidate.brand)} {candidate.confidence:.0%}</span>"
+        for candidate in inspection.brand_candidates[:5]
+    )
+    return f"<div class=\"tags\">{tags}</div>" if tags else "<p>ブランド候補はありません。</p>"
+
+
+def render_compact_model_candidates(inspection: ImageInspectionResponse) -> str:
+    if not inspection.model_candidates:
+        return "<p>モデル候補は写真から十分に確認できませんでした。</p>"
+    rows = "\n".join(
+        f"""<div class="comparable">
+  <strong>{escape(candidate.brand)} {escape(candidate.model)}</strong> <span class="small">{candidate.confidence:.0%}</span>
+  <div class="small">{escape(candidate.evidence)}</div>
+</div>"""
+        for candidate in inspection.model_candidates[:3]
+    )
+    return rows
+
+
 def render_feature_tags(values: list[str]) -> str:
     if not values:
         return ""
@@ -1025,14 +1200,6 @@ def render_normalized_request(request: AuctionAnalysisRequest | PriceEstimateReq
         for label, value in values
     )
     return f"<div class=\"tags\">{tags}</div>"
-
-
-def render_image_summary(image_names: list[str]) -> str:
-    if not image_names:
-        return """<div class="warning">画像は未アップロードです。正面、背面、角、内側/シリアル、金具、ダメージ箇所の写真を追加すると状態確認がしやすくなります。</div>"""
-    names = ", ".join(escape(name) for name in image_names[:6])
-    extra = "" if len(image_names) <= 6 else f" and {len(image_names) - 6} more"
-    return f"""<div class="warning">画像 {len(image_names)} 件を受け取りました: {names}{extra}。現在は分析条件には使わず、状態確認メモとして扱います。</div>"""
 
 
 def render_price_range(label: str, price_range) -> str:
@@ -1196,20 +1363,11 @@ def render_auction_record(item) -> str:
     title = escape(item.title)
     url = item.item_url
     title_html = f"<a href=\"{escape(url)}\" target=\"_blank\" rel=\"noreferrer\">{title}</a>" if url else title
+    image_html = ""
+    if item.image_url:
+        image_html = f' <a href="{escape(item.image_url)}" target="_blank" rel="noreferrer">画像</a>'
     sold_date = item.sold_date.isoformat() if item.sold_date else "unknown date"
     return f"""<div class="comparable">
   <strong>{item.price_jpy:,}円</strong> <span class="small">{escape(sold_date)} / rank {escape(item.rank or '-')} / {escape(item.shape or '-')}</span>
-  <div>{title_html}</div>
-</div>"""
-
-
-def render_comparable(item) -> str:
-    title = escape(item.title)
-    url = item.item_url
-    title_html = f"<a href=\"{escape(url)}\" target=\"_blank\" rel=\"noreferrer\">{title}</a>" if url else title
-    sold_date = item.sold_date.isoformat() if item.sold_date else "unknown date"
-    return f"""<div class="comparable">
-  <strong>{item.price_jpy:,}円</strong> <span class="small">{escape(sold_date)} / rank {escape(item.rank or '-')} / score {item.score:.1f}</span>
-  <div>{title_html}</div>
-  <div class="small">{escape(', '.join(item.score_reasons[:3]))}</div>
+  <div>{title_html}{image_html}</div>
 </div>"""
