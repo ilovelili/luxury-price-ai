@@ -12,7 +12,7 @@ from luxury_price_ai.config import Settings
 from luxury_price_ai.models import BrandCandidate, ImageInspectionResponse, ModelCandidate
 
 
-MAX_IMAGES = 6
+MAX_IMAGES = 12
 MAX_IMAGE_BYTES = 10 * 1024 * 1024
 ALLOWED_CONDITION_STATUS = {
     "新品・未使用",
