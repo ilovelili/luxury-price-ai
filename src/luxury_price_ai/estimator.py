@@ -11,7 +11,7 @@ from luxury_price_ai.models import (
     PriceEstimateResponse,
     PriceRange,
 )
-from luxury_price_ai.tokens import extract_tokens, normalize_text, token_set
+from luxury_price_ai.tokens import canonical_token, extract_tokens, normalize_text, token_set
 
 
 RANK_ORDER = {
@@ -40,11 +40,26 @@ def estimate_price(
         if candidate.price_jpy > 0
     ]
     scored.sort(key=lambda item: item.score, reverse=True)
-    comparables = scored[: request.limit]
+    qualified = [
+        item
+        for item in scored
+        if item.match_quality in {"exact", "close"}
+    ]
+    weak = [
+        item
+        for item in scored
+        if item.match_quality == "weak"
+    ]
+    excluded = [
+        item
+        for item in scored
+        if item.match_quality == "excluded"
+    ]
+    comparables = [*qualified, *weak, *excluded][: request.limit]
 
-    market_range = price_range([item.price_jpy for item in comparables])
+    market_range = price_range([item.price_jpy for item in qualified])
     offer_range = apply_offer_range(market_range, settings.offer_multiplier)
-    confidence = estimate_confidence(comparables, missing_inputs)
+    confidence = estimate_confidence(qualified, missing_inputs)
 
     return PriceEstimateResponse(
         market_price_jpy=market_range,
@@ -53,6 +68,7 @@ def estimate_price(
         missing_inputs=missing_inputs,
         extracted_tokens=request_tokens,
         comparable_count=len(scored),
+        qualified_comparable_count=len(qualified),
         comparables=comparables,
     )
 
@@ -64,21 +80,25 @@ def score_sale(
 ) -> ComparableSale:
     score = 0.0
     reasons = []
+    exclusion_reasons = []
 
     if same_text(request.brand, sale.brand):
         score += 10
         reasons.append("same brand")
+    else:
+        exclusion_reasons.append("different brand")
 
     if request.category and same_text(request.category, sale.category):
         score += 8
         reasons.append("same category")
+    elif request.category:
+        exclusion_reasons.append("different category")
 
     if request.shape and same_text(request.shape, sale.shape):
         score += 10
         reasons.append("same shape")
-    elif request.shape and sale.shape:
-        score += 2
-        reasons.append("different shape but same brand/category pool")
+    elif request.shape:
+        exclusion_reasons.append("different shape")
 
     rank_points = rank_similarity(request.rank, sale.rank)
     if rank_points:
@@ -91,6 +111,7 @@ def score_sale(
         token_points = 6 * len(overlap)
         score += token_points
         reasons.append("shared tokens: " + ", ".join(sorted(overlap)))
+    exclusion_reasons.extend(required_token_mismatches(request_tokens, sale_tokens))
 
     title_points = title_similarity(request.title, sale.title) * 8
     if title_points:
@@ -101,6 +122,10 @@ def score_sale(
     if recency_points:
         score += recency_points
         reasons.append(f"recent sale +{recency_points:.1f}")
+
+    match_quality = classify_match(request, request_tokens, sale, sale_tokens, exclusion_reasons)
+    if match_quality == "excluded":
+        score = 0.0
 
     return ComparableSale(
         item_id=sale.item_id,
@@ -114,9 +139,72 @@ def score_sale(
         item_url=sale.item_url,
         image_url=sale.image_url,
         score=round(score, 3),
+        match_quality=match_quality,
         score_reasons=reasons,
+        exclusion_reasons=exclusion_reasons,
         extracted_tokens=sale_tokens,
     )
+
+
+def required_token_mismatches(request_tokens, sale_tokens) -> list[str]:
+    mismatches = []
+    requirements = [
+        ("model/line", request_tokens.models, sale_tokens.models),
+        ("material", request_tokens.materials, sale_tokens.materials),
+        ("color", request_tokens.colors, sale_tokens.colors),
+        ("hardware", request_tokens.hardware, sale_tokens.hardware),
+    ]
+    for label, requested, actual in requirements:
+        if requested and not token_overlap(requested, actual):
+            mismatches.append(f"missing {label} match")
+    return mismatches
+
+
+def classify_match(
+    request: PriceEstimateRequest,
+    request_tokens,
+    sale: AuctionSale,
+    sale_tokens,
+    exclusion_reasons: list[str],
+) -> str:
+    hard_mismatches = {
+        "different brand",
+        "different category",
+        "different shape",
+        "missing model/line match",
+        "missing material match",
+        "missing color match",
+        "missing hardware match",
+    }
+    if any(reason in hard_mismatches for reason in exclusion_reasons):
+        return "excluded"
+    if not request_tokens.models:
+        return "weak"
+    if not request.rank or not sale.rank:
+        return "weak"
+    distance = rank_distance(request.rank, sale.rank)
+    if distance is None:
+        return "weak"
+    if distance > 1:
+        exclusion_reasons.append("condition rank too different")
+        return "excluded"
+    if distance == 0 and exact_token_match(request_tokens, sale_tokens):
+        return "exact"
+    return "close"
+
+
+def exact_token_match(request_tokens, sale_tokens) -> bool:
+    groups = [
+        (request_tokens.models, sale_tokens.models),
+        (request_tokens.materials, sale_tokens.materials),
+        (request_tokens.colors, sale_tokens.colors),
+        (request_tokens.hardware, sale_tokens.hardware),
+    ]
+    return all(not requested or token_overlap(requested, actual) for requested, actual in groups)
+
+
+def token_overlap(left: list[str], right: list[str]) -> bool:
+    return bool({canonical_token(item) for item in left} & {canonical_token(item) for item in right})
 
 
 def same_text(left: str | None, right: str | None) -> bool:
@@ -132,6 +220,16 @@ def rank_similarity(request_rank: str | None, sale_rank: str | None) -> float:
         return 0.0
     distance = abs(left - right)
     return max(0.0, 8.0 - (distance * 2.0))
+
+
+def rank_distance(request_rank: str | None, sale_rank: str | None) -> int | None:
+    if not request_rank or not sale_rank:
+        return None
+    left = RANK_ORDER.get(normalize_text(request_rank))
+    right = RANK_ORDER.get(normalize_text(sale_rank))
+    if left is None or right is None:
+        return None
+    return abs(left - right)
 
 
 def title_similarity(left: str, right: str) -> float:
@@ -196,8 +294,15 @@ def missing_fields(request: PriceEstimateRequest) -> list[str]:
         missing.append("shape")
     if not request.rank:
         missing.append("rank")
-    if not token_set(extract_tokens(request.title)):
-        missing.append("model/material/color/hardware title tokens")
+    tokens = extract_tokens(request.title)
+    if not tokens.models:
+        missing.append("confirmed model/line")
+    if not tokens.materials:
+        missing.append("confirmed material")
+    if not tokens.colors:
+        missing.append("confirmed color")
+    if not tokens.hardware:
+        missing.append("confirmed hardware")
     return missing
 
 

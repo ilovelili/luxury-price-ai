@@ -59,7 +59,9 @@ class ComparableSale(BaseModel):
     item_url: str | None = None
     image_url: str | None = None
     score: float
+    match_quality: str = "weak"
     score_reasons: list[str]
+    exclusion_reasons: list[str] = Field(default_factory=list)
     extracted_tokens: ExtractedTokens
 
 
@@ -70,6 +72,7 @@ class PriceEstimateResponse(BaseModel):
     missing_inputs: list[str]
     extracted_tokens: ExtractedTokens
     comparable_count: int
+    qualified_comparable_count: int = 0
     comparables: list[ComparableSale]
 
 

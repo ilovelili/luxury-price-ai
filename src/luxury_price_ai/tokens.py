@@ -14,13 +14,34 @@ TOKEN_DICTIONARY = {
         "チェーンウォレット",
         "シャネル22",
         "CHANEL22",
+        "シャネル19",
+        "CHANEL19",
+        "クラシックフラップ",
+        "CLASSIC FLAP",
+        "ダブルフラップ",
+        "シングルフラップ",
+        "BOY",
+        "COCO HANDLE",
         "GST",
         "バニティ",
         "ミニマトラッセ",
+        "ネヴァーフル",
+        "NEVERFULL",
+        "アルマ",
+        "スピーディ",
+        "オンザゴー",
+        "キーポル",
+        "バーキン",
+        "ケリー",
+        "コンスタンス",
+        "ピコタン",
+        "エヴリン",
     ],
     "materials": [
         "キャビアスキン",
         "ラムスキン",
+        "グレインドカーフ",
+        "カーフスキン",
         "リザード",
         "ジャージ",
         "エナメル",
@@ -29,30 +50,59 @@ TOKEN_DICTIONARY = {
         "レザー",
         "ナイロン",
         "キャンバス",
+        "モノグラム",
+        "ダミエ",
+        "エピ",
+        "タイガ",
+        "ヴェルニ",
+        "トゴ",
+        "エプソン",
+        "トリヨンクレマンス",
+        "ボックスカーフ",
     ],
     "colors": [
         "黒",
         "ブラック",
+        "BLACK",
         "白",
         "ホワイト",
+        "WHITE",
         "赤",
         "レッド",
+        "RED",
         "ネイビー",
+        "NAVY",
         "ベージュ",
+        "BEIGE",
         "ピンク",
+        "PINK",
         "ブラウン",
         "茶",
+        "BROWN",
         "グレー",
+        "GRAY",
+        "GREY",
         "グリーン",
+        "GREEN",
         "青",
         "ブルー",
+        "BLUE",
+        "エトゥープ",
+        "ナチュラル",
+        "アイボリー",
     ],
     "hardware": [
         "ゴールド金具",
+        "GOLD HARDWARE",
         "シルバー金具",
+        "SILVER HARDWARE",
         "ソーブラック",
         "アンティーク金具",
         "金具",
+        "GP",
+        "SV",
+        "パラジウム金具",
+        "シャンパンゴールド金具",
     ],
     "accessories": [
         "ギャランティカード",
@@ -63,6 +113,24 @@ TOKEN_DICTIONARY = {
         "保存袋",
         "カード",
         "シール",
+        "ストラップ",
+        "クロシェット",
+        "カデナ",
+    ],
+    "sizes": [
+        "ミニ",
+        "スモール",
+        "ミディアム",
+        "ラージ",
+        "PM",
+        "MM",
+        "GM",
+        "25",
+        "28",
+        "30",
+        "32",
+        "35",
+        "40",
     ],
 }
 
@@ -73,6 +141,37 @@ def normalize_text(value: str | None) -> str:
     if not value:
         return ""
     return value.strip().upper().replace("　", " ")
+
+
+def canonical_token(value: str | None) -> str:
+    text = normalize_text(value)
+    aliases = {
+        "BLACK": "黒",
+        "ブラック": "黒",
+        "WHITE": "白",
+        "ホワイト": "白",
+        "RED": "赤",
+        "レッド": "赤",
+        "BLUE": "青",
+        "ブルー": "青",
+        "GREEN": "グリーン",
+        "ゴールド": "ゴールド金具",
+        "GOLD HARDWARE": "ゴールド金具",
+        "GP": "ゴールド金具",
+        "シルバー": "シルバー金具",
+        "SILVER HARDWARE": "シルバー金具",
+        "SV": "シルバー金具",
+        "CHANEL22": "シャネル22",
+        "CHANEL 22": "シャネル22",
+        "CHANEL19": "シャネル19",
+        "CHANEL 19": "シャネル19",
+        "NEVERFULL": "ネヴァーフル",
+        "CLASSIC FLAP": "マトラッセ",
+        "BOY": "ボーイ",
+        "BOY CHANEL": "ボーイ",
+        "COCO HANDLE": "ココハンドル",
+    }
+    return aliases.get(text, text)
 
 
 def extract_tokens(title: str | None) -> ExtractedTokens:
@@ -98,7 +197,7 @@ def extract_tokens(title: str | None) -> ExtractedTokens:
         colors=found["colors"],
         hardware=found["hardware"],
         accessories=found["accessories"],
-        words=dedupe(words)[:30],
+        words=dedupe([*found["sizes"], *words])[:30],
     )
 
 
@@ -111,7 +210,7 @@ def token_set(tokens: ExtractedTokens) -> set[str]:
         tokens.hardware,
         tokens.accessories,
     ):
-        values.update(normalize_text(token) for token in group)
+        values.update(canonical_token(token) for token in group)
     return values
 
 

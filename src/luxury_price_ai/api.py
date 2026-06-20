@@ -251,36 +251,51 @@ def image_auction_analysis(
 
 def run_estimate(request: PriceEstimateRequest) -> PriceEstimateResponse:
     settings = get_settings()
-    try:
-        store = PostgresStore(settings.database_url or "")
-        candidates = store.fetch_candidates(
-            brand=request.brand,
-            category=request.category,
-            sold_after=request.sold_after,
-        )
-    except DatabaseConfigError as exc:
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=f"database query failed: {exc}") from exc
-
+    candidates = fetch_candidate_sales(request.brand, request.category, request.sold_after)
     return estimate_price(request, candidates, settings)
 
 
-def run_auction_analysis(request: AuctionAnalysisRequest) -> AuctionAnalysisResponse:
+def fetch_candidate_sales(
+    brand: str,
+    category: str | None,
+    sold_after,
+):
     settings = get_settings()
     try:
         store = PostgresStore(settings.database_url or "")
-        candidates = store.fetch_candidates(
-            brand=request.brand,
-            category=request.category,
-            sold_after=request.sold_after,
+        return store.fetch_candidates(
+            brand=brand,
+            category=category,
+            sold_after=sold_after,
         )
     except DatabaseConfigError as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"database query failed: {exc}") from exc
 
+
+def run_auction_analysis(request: AuctionAnalysisRequest) -> AuctionAnalysisResponse:
+    candidates = fetch_candidate_sales(request.brand, request.category, request.sold_after)
     return analyze_auction_sales(request, candidates)
+
+
+def run_strict_auction_analysis(
+    request: AuctionAnalysisRequest,
+    estimate: PriceEstimateResponse,
+    candidates,
+) -> AuctionAnalysisResponse:
+    qualified_ids = {
+        comparable.item_id
+        for comparable in estimate.comparables
+        if comparable.match_quality in {"exact", "close"}
+    }
+    if not qualified_ids:
+        return analyze_auction_sales(request, [])
+
+    return analyze_auction_sales(
+        request,
+        [candidate for candidate in candidates if candidate.item_id in qualified_ids],
+    )
 
 
 def run_image_inspection(images: list[UploadFile]) -> ImageInspectionResponse:
@@ -317,14 +332,15 @@ def run_image_auction_analysis(
             limit=50,
         )
         request = AuctionAnalysisRequest.model_validate(base_request.model_dump())
-        analysis = run_auction_analysis(request)
         estimate_request = PriceEstimateRequest.model_validate(
             {
                 **request.model_dump(),
                 "limit": 20,
             }
         )
-        estimate = run_estimate(estimate_request)
+        candidates = fetch_candidate_sales(request.brand, request.category, request.sold_after)
+        estimate = estimate_price(estimate_request, candidates, get_settings())
+        analysis = run_strict_auction_analysis(request, estimate, candidates)
         return ImageAuctionAnalysisResponse(
             inspection=None,
             inferred_request=request,
@@ -345,14 +361,15 @@ def run_image_auction_analysis(
         condition_status=condition_status,
         item_description=item_description,
     )
-    analysis = run_auction_analysis(request)
     estimate_request = PriceEstimateRequest.model_validate(
         {
             **request.model_dump(),
             "limit": 20,
         }
     )
-    estimate = run_estimate(estimate_request)
+    candidates = fetch_candidate_sales(request.brand, request.category, request.sold_after)
+    estimate = estimate_price(estimate_request, candidates, get_settings())
+    analysis = run_strict_auction_analysis(request, estimate, candidates)
     missing_inputs = image_analysis_missing_inputs(inspection, request)
     return ImageAuctionAnalysisResponse(
         inspection=inspection,
@@ -957,17 +974,19 @@ def render_image_auction_analysis_result(
     charts = render_analysis_charts(analysis)
     records = "\n".join(render_auction_record(item) for item in analysis.records[:10])
     missing = render_text_list(response.missing_inputs, "追加で必要な情報はありません。")
+    quality = render_comparable_quality_summary(estimate)
     return f"""
-<h2>Image auction analysis result</h2>
+<h2>Auction sales analysis result</h2>
 {image_summary}
 {normalized}
 <div class="grid">
   {market}
   {offer}
-  <div class="metric"><span>Confidence</span><b>{response.confidence:.0%}</b><small>画像 + 相場表検索</small></div>
+  <div class="metric"><span>Confidence</span><b>{response.confidence:.0%}</b><small>商品特定 + 厳格比較</small></div>
   {render_condition_metric(inspection)}
   <div class="metric"><span>条件一致</span><b>{analysis.record_count:,}件</b><small>表示 {len(analysis.records):,}件</small></div>
 </div>
+{quality}
 {render_image_candidates_section(inspection)}
 <h2>Missing inputs</h2>
 {missing}
@@ -1053,12 +1072,49 @@ def render_normalized_request(request: AuctionAnalysisRequest | PriceEstimateReq
 
 def render_price_range(label: str, price_range) -> str:
     if not price_range:
-        return f"<div class=\"metric\"><span>{escape(label)}</span><b>-</b><small>No range</small></div>"
+        return f"<div class=\"metric\"><span>{escape(label)}</span><b>算出不可</b><small>厳格な比較対象が不足</small></div>"
     return f"""<div class="metric">
   <span>{escape(label)}</span>
   <b>{price_range.mid:,}円</b>
   <small>{price_range.low:,}円 - {price_range.high:,}円</small>
     </div>"""
+
+
+def render_comparable_quality_summary(estimate: PriceEstimateResponse) -> str:
+    counts = {
+        "exact": 0,
+        "close": 0,
+        "weak": 0,
+        "excluded": 0,
+    }
+    for comparable in estimate.comparables:
+        if comparable.match_quality in counts:
+            counts[comparable.match_quality] += 1
+    if estimate.market_price_jpy:
+        lead = "価格レンジは exact / close comparable のみで算出しています。"
+    else:
+        lead = "型・素材・色・金具・状態が十分に揃った comparable が不足しているため、価格レンジは出していません。"
+    review_examples = [
+        comparable
+        for comparable in estimate.comparables
+        if comparable.match_quality in {"weak", "excluded"}
+    ][:3]
+    weak_html = "".join(
+        f"""<div class="comparable">
+  <strong>{escape(item.match_quality)}</strong> <span class="small">{escape(item.title)}</span>
+  <div class="small">{escape(', '.join(item.exclusion_reasons or item.score_reasons[:3]))}</div>
+</div>"""
+        for item in review_examples
+    )
+    return f"""<div class="warning">{escape(lead)}</div>
+<div class="tags">
+  <span class="tag">exact: {counts["exact"]}</span>
+  <span class="tag">close: {counts["close"]}</span>
+  <span class="tag">weak: {counts["weak"]}</span>
+  <span class="tag">excluded: {counts["excluded"]}</span>
+  <span class="tag">qualified: {estimate.qualified_comparable_count}</span>
+</div>
+{weak_html}"""
 
 
 def render_stats(analysis: AuctionAnalysisResponse) -> str:

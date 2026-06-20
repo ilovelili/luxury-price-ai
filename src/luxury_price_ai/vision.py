@@ -146,9 +146,11 @@ def image_inspection_prompt() -> str:
 
 Return JSON only. Do not wrap it in Markdown.
 
-Infer likely brand, product line/model, and visible condition status from the images. Use only visible evidence. Do not claim authenticity or final appraisal certainty.
+Infer likely brand, product line/model, and visible condition status from the images. Use only visible evidence. Do not claim authenticity or final appraisal certainty. Prioritize product identification over price estimation.
 
 For model_candidates, identify likely luxury resale model/line names such as CHANEL Classic Flap, CHANEL Boy, CHANEL 19, CHANEL Gabrielle, CHANEL Matelasse, LOUIS VUITTON Neverfull, HERMES Kelly, HERMES Birkin, etc. Include exact SKU/reference only when it is visibly readable. If exact SKU/reference is not visible, use the closest known line/model name and mention that the exact SKU needs serial/reference or measurements.
+
+In distinguishing_features, include visible appraisal-defining attributes whenever possible: material, color, hardware color, size/class, series/era clues, strap type, closure type, and accessories. These fields are used only to help staff identify the item; do not imply the market price can be determined from images alone.
 
 Preferred photo set is 6 images/angles:
 {chr(10).join(f"- {angle}" for angle in RECOMMENDED_PHOTO_ANGLES)}
