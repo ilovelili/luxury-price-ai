@@ -11,14 +11,22 @@ SHAPE_KEYWORDS = [
     ("チェーンウォレット", "チェーンウォレット"),
     ("チェーンショルダー", "ショルダーバッグ"),
     ("ショルダー", "ショルダーバッグ"),
+    ("SHOULDER BAG", "ショルダーバッグ"),
+    ("SHOULDER", "ショルダーバッグ"),
     ("ハンドバッグ", "ハンドバッグ"),
     ("ハンド", "ハンドバッグ"),
+    ("HAND BAG", "ハンドバッグ"),
+    ("HANDBAG", "ハンドバッグ"),
     ("トート", "トートバッグ"),
+    ("TOTE", "トートバッグ"),
     ("バニティ", "バニティバッグ"),
+    ("VANITY", "バニティバッグ"),
     ("リュック", "リュック"),
     ("バックパック", "リュック"),
+    ("BACKPACK", "リュック"),
     ("財布", "財布"),
     ("ウォレット", "財布"),
+    ("WALLET", "財布"),
 ]
 
 BAG_WORDS = {
@@ -98,11 +106,17 @@ def build_auction_request_from_image_inspection(
     normalized_rank = normalize_condition_status(condition_status)
 
     inspection_text = image_search_text(inspection)
+    inferred_shape = (
+        normalized_shape
+        or infer_shape(item_name)
+        or infer_shape(item_description)
+        or infer_shape(inspection_text)
+    )
     title_parts = [
         normalized_brand or inferred_brand,
         item_name.strip(),
         item_color.strip(),
-        normalized_shape or infer_shape(inspection_text) or "",
+        inferred_shape or "",
         item_description.strip(),
         inspection_text,
     ]
@@ -110,8 +124,8 @@ def build_auction_request_from_image_inspection(
     return AuctionAnalysisRequest(
         brand=normalized_brand or inferred_brand,
         category=normalized_category or infer_category(title) or "バッグ",
-        shape=normalized_shape or infer_shape(title),
-        rank=normalized_rank or normalize_condition_status(inspection.condition_status),
+        shape=inferred_shape,
+        rank=normalized_rank,
         title=title,
         limit=limit,
     )
@@ -202,8 +216,9 @@ def infer_category(text: str) -> str | None:
 
 
 def infer_shape(text: str) -> str | None:
+    normalized_text = text.upper()
     for keyword, shape in SHAPE_KEYWORDS:
-        if keyword in text:
+        if keyword in text or keyword in normalized_text:
             return shape
     return None
 
