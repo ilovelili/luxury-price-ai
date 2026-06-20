@@ -68,6 +68,7 @@ class ComparableSale(BaseModel):
 class PriceEstimateResponse(BaseModel):
     market_price_jpy: PriceRange | None
     purchase_offer_jpy: PriceRange | None
+    price_basis: str = "unavailable"
     confidence: float
     missing_inputs: list[str]
     extracted_tokens: ExtractedTokens

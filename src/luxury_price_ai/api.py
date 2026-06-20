@@ -284,10 +284,13 @@ def run_strict_auction_analysis(
     estimate: PriceEstimateResponse,
     candidates,
 ) -> AuctionAnalysisResponse:
+    allowed_qualities = {"exact", "close"}
+    if estimate.price_basis == "reference":
+        allowed_qualities = {"weak"}
     qualified_ids = {
         comparable.item_id
         for comparable in estimate.comparables
-        if comparable.match_quality in {"exact", "close"}
+        if comparable.match_quality in allowed_qualities
     }
     if not qualified_ids:
         return analyze_auction_sales(request, [])
@@ -967,8 +970,9 @@ def render_image_auction_analysis_result(
     estimate = response.estimate
     normalized = render_normalized_request(response.inferred_request)
     image_summary = render_image_analysis_summary(image_names, response)
-    market = render_price_range("推定市場価格", estimate.market_price_jpy)
-    offer = render_price_range("買取提示レンジ", estimate.purchase_offer_jpy)
+    market_label = "参考市場価格" if estimate.price_basis == "reference" else "推定市場価格"
+    market = render_price_range(market_label, estimate.market_price_jpy, estimate.price_basis)
+    offer = render_price_range("買取提示レンジ", estimate.purchase_offer_jpy, estimate.price_basis)
     stats = render_stats(analysis)
     trend = render_trend(analysis)
     charts = render_analysis_charts(analysis)
@@ -1070,13 +1074,15 @@ def render_normalized_request(request: AuctionAnalysisRequest | PriceEstimateReq
     return f"<div class=\"tags\">{tags}</div>"
 
 
-def render_price_range(label: str, price_range) -> str:
+def render_price_range(label: str, price_range, price_basis: str = "strict") -> str:
     if not price_range:
-        return f"<div class=\"metric\"><span>{escape(label)}</span><b>算出不可</b><small>厳格な比較対象が不足</small></div>"
+        detail = "商品詳細確認後に算出" if price_basis == "reference" and "買取" in label else "厳格な比較対象が不足"
+        return f"<div class=\"metric\"><span>{escape(label)}</span><b>算出不可</b><small>{escape(detail)}</small></div>"
+    detail = "要確認・弱い比較含む" if price_basis == "reference" else f"{price_range.low:,}円 - {price_range.high:,}円"
     return f"""<div class="metric">
   <span>{escape(label)}</span>
   <b>{price_range.mid:,}円</b>
-  <small>{price_range.low:,}円 - {price_range.high:,}円</small>
+  <small>{escape(detail)}</small>
     </div>"""
 
 
@@ -1090,8 +1096,10 @@ def render_comparable_quality_summary(estimate: PriceEstimateResponse) -> str:
     for comparable in estimate.comparables:
         if comparable.match_quality in counts:
             counts[comparable.match_quality] += 1
-    if estimate.market_price_jpy:
+    if estimate.price_basis == "strict":
         lead = "価格レンジは exact / close comparable のみで算出しています。"
+    elif estimate.price_basis == "reference":
+        lead = "商品名・型番・素材などが未確定のため、weak comparable から参考相場のみ表示しています。買取提示は出していません。"
     else:
         lead = "型・素材・色・金具・状態が十分に揃った comparable が不足しているため、価格レンジは出していません。"
     review_examples = [

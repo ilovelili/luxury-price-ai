@@ -86,8 +86,32 @@ class StrictEstimatorTest(unittest.TestCase):
         )
 
         self.assertIsNone(response.market_price_jpy)
+        self.assertEqual(response.price_basis, "unavailable")
         self.assertIn("confirmed model/line", response.missing_inputs)
         self.assertEqual(response.comparables[0].match_quality, "weak")
+
+    def test_returns_reference_range_when_weak_pool_is_large_enough(self) -> None:
+        request = PriceEstimateRequest(
+            brand="CHANEL",
+            category="バッグ",
+            shape="ショルダーバッグ",
+            rank="AB",
+            title="CHANEL 黒 ゴールド金具",
+        )
+
+        response = estimate_price(
+            request,
+            [
+                sale(f"candidate-{index}", "CHANEL マトラッセ キャビアスキン 黒 ゴールド金具", 200_000 + (index * 10_000))
+                for index in range(5)
+            ],
+            SETTINGS,
+        )
+
+        self.assertEqual(response.price_basis, "reference")
+        self.assertIsNotNone(response.market_price_jpy)
+        self.assertIsNone(response.purchase_offer_jpy)
+        self.assertEqual(response.qualified_comparable_count, 0)
 
 
 if __name__ == "__main__":

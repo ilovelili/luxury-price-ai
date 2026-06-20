@@ -57,13 +57,22 @@ def estimate_price(
     ]
     comparables = [*qualified, *weak, *excluded][: request.limit]
 
-    market_range = price_range([item.price_jpy for item in qualified])
-    offer_range = apply_offer_range(market_range, settings.offer_multiplier)
-    confidence = estimate_confidence(qualified, missing_inputs)
+    price_basis = "strict"
+    priced_comparables = qualified
+    if not priced_comparables and len(weak) >= 5:
+        price_basis = "reference"
+        priced_comparables = weak[: request.limit]
+    elif not priced_comparables:
+        price_basis = "unavailable"
+
+    market_range = price_range([item.price_jpy for item in priced_comparables])
+    offer_range = apply_offer_range(market_range, settings.offer_multiplier) if price_basis == "strict" else None
+    confidence = estimate_confidence(priced_comparables, missing_inputs, price_basis)
 
     return PriceEstimateResponse(
         market_price_jpy=market_range,
         purchase_offer_jpy=offer_range,
+        price_basis=price_basis,
         confidence=confidence,
         missing_inputs=missing_inputs,
         extracted_tokens=request_tokens,
@@ -306,10 +315,17 @@ def missing_fields(request: PriceEstimateRequest) -> list[str]:
     return missing
 
 
-def estimate_confidence(comparables: list[ComparableSale], missing_inputs: list[str]) -> float:
+def estimate_confidence(
+    comparables: list[ComparableSale],
+    missing_inputs: list[str],
+    price_basis: str = "strict",
+) -> float:
     if not comparables:
         return 0.0
     count_score = min(1.0, len(comparables) / 20.0)
     top_score = min(1.0, comparables[0].score / 45.0)
     missing_penalty = min(0.5, len(missing_inputs) * 0.1)
-    return round(max(0.0, (count_score * 0.45) + (top_score * 0.55) - missing_penalty), 2)
+    confidence = (count_score * 0.45) + (top_score * 0.55) - missing_penalty
+    if price_basis == "reference":
+        confidence *= 0.55
+    return round(max(0.0, confidence), 2)
