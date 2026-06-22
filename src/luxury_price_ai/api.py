@@ -428,8 +428,9 @@ def attach_appraisal_rationale(
 def build_fallback_appraisal_rationale(response: ImageAuctionAnalysisResponse) -> str:
     request = response.inferred_request
     estimate = response.estimate
+    item_label = request.title or request.shape or request.category or "商品"
     parts = [
-        f"{request.brand or 'ブランド不明'} {request.item_name or request.shape or request.category or '商品'} の参考査定です。",
+        f"{request.brand or 'ブランド不明'} {item_label} の参考査定です。",
         f"参考市場価格は {format_price_range_for_display(estimate.market_price_jpy)}、買取提示レンジは {format_price_range_for_display(estimate.purchase_offer_jpy)} です。",
         f"比較対象は {estimate.comparable_count} 件、厳格条件一致は {estimate.qualified_comparable_count} 件です。",
     ]
