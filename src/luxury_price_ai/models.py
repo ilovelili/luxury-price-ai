@@ -172,6 +172,9 @@ class ImageAuctionAnalysisResponse(BaseModel):
     estimate: PriceEstimateResponse
     confidence: float
     missing_inputs: list[str]
+    appraisal_rationale: str | None = None
+    appraisal_rationale_source: str | None = None
+    appraisal_rationale_error: str | None = None
 
 
 class BrandCandidate(BaseModel):

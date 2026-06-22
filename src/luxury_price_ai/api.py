@@ -12,6 +12,7 @@ import httpx
 
 from luxury_price_ai.analysis import analyze_auction_sales
 from luxury_price_ai.config import get_settings
+from luxury_price_ai.dify import DifyClient, DifyConfigError
 from luxury_price_ai.estimator import estimate_price
 from luxury_price_ai.intake import (
     build_auction_request_from_image_inspection,
@@ -177,7 +178,7 @@ def submit_image_auction_analysis_form(
         render_image_auction_analysis_page(
             form_values=form_values,
             image_names=image_names,
-            response=response,
+            response=attach_appraisal_rationale(response, form_values, item_images),
         )
     )
 
@@ -237,7 +238,16 @@ def image_auction_analysis(
 ) -> ImageAuctionAnalysisResponse:
     settings = get_settings()
     require_api_key(settings.app_api_key, x_api_key)
-    return run_image_auction_analysis(
+    form_values = {
+        "item_category": item_category,
+        "brand": brand,
+        "item_shape": item_shape,
+        "item_name": item_name,
+        "item_color": item_color,
+        "condition_status": condition_status,
+        "item_description": item_description,
+    }
+    response = run_image_auction_analysis(
         item_images,
         brand=brand,
         item_category=item_category,
@@ -247,6 +257,7 @@ def image_auction_analysis(
         condition_status=condition_status,
         item_description=item_description,
     )
+    return attach_appraisal_rationale(response, form_values, item_images)
 
 
 def run_estimate(request: PriceEstimateRequest) -> PriceEstimateResponse:
@@ -387,6 +398,29 @@ def run_image_auction_analysis(
         ),
         missing_inputs=missing_inputs,
     )
+
+
+def attach_appraisal_rationale(
+    response: ImageAuctionAnalysisResponse,
+    form_values: dict[str, str],
+    images: list[UploadFile],
+) -> ImageAuctionAnalysisResponse:
+    settings = get_settings()
+    try:
+        draft = DifyClient(settings).run_appraisal_workflow(
+            form_values=form_values,
+            analysis_response=response,
+            images=images,
+        )
+    except DifyConfigError:
+        return response
+    except Exception as exc:
+        response.appraisal_rationale_error = f"Dify appraisal workflow failed: {exc}"
+        return response
+
+    response.appraisal_rationale = draft.text
+    response.appraisal_rationale_source = "Dify Knowledge workflow"
+    return response
 
 
 def has_uploaded_images(images: list[UploadFile]) -> bool:
@@ -992,6 +1026,7 @@ def render_image_auction_analysis_result(
 </div>
 {quality}
 {render_image_candidates_section(inspection)}
+{render_appraisal_rationale_section(response)}
 <h2>Missing inputs</h2>
 {missing}
 <h2>Market table</h2>
@@ -1001,6 +1036,21 @@ def render_image_auction_analysis_result(
 <h2>Auction records</h2>
 {records or '<p>No matching auction records found.</p>'}
 """
+
+
+def render_appraisal_rationale_section(response: ImageAuctionAnalysisResponse) -> str:
+    if response.appraisal_rationale:
+        body = "<br>".join(escape(line) for line in response.appraisal_rationale.splitlines())
+        source = escape(response.appraisal_rationale_source or "Dify")
+        return f"""<h2>査定コメント</h2>
+<div class="comparable">
+  <div class="small">{source}</div>
+  <p>{body}</p>
+</div>"""
+    if response.appraisal_rationale_error:
+        return f"""<h2>査定コメント</h2>
+<div class="warning">{escape(response.appraisal_rationale_error)}</div>"""
+    return ""
 
 
 def render_image_candidates_section(inspection: ImageInspectionResponse | None) -> str:

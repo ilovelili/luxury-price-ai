@@ -61,6 +61,24 @@ def inspect_luxury_image_payloads(
 
     image_inputs = prepare_image_inputs(images)
     prompt = image_inspection_prompt()
+    openai_inspection = inspect_with_openai(image_inputs, prompt, settings)
+    if not settings.gemini_api_key:
+        return openai_inspection
+
+    try:
+        gemini_inspection = inspect_with_gemini(images, prompt, settings)
+    except Exception as exc:
+        openai_inspection.warnings.append(f"Gemini画像解析は失敗しました: {exc}")
+        return openai_inspection
+
+    return merge_provider_inspections(openai_inspection, gemini_inspection)
+
+
+def inspect_with_openai(
+    image_inputs: list[dict[str, str]],
+    prompt: str,
+    settings: Settings,
+) -> ImageInspectionResponse:
     payload = {
         "model": settings.openai_vision_model,
         "input": [
@@ -88,6 +106,180 @@ def inspect_luxury_image_payloads(
         raise RuntimeError(f"OpenAI vision request failed: {response.status_code} {response.text[:500]}")
 
     return parse_inspection_response(response.json())
+
+
+def inspect_with_gemini(
+    images: list[ImagePayload],
+    prompt: str,
+    settings: Settings,
+) -> ImageInspectionResponse:
+    parts: list[dict[str, Any]] = [{"text": prompt}]
+    for image in images:
+        content_type = image.content_type or "image/jpeg"
+        encoded = base64.b64encode(image.content).decode("ascii")
+        parts.append(
+            {
+                "inline_data": {
+                    "mime_type": content_type,
+                    "data": encoded,
+                }
+            }
+        )
+
+    payload = {
+        "contents": [
+            {
+                "parts": parts,
+            }
+        ],
+        "generationConfig": {
+            "temperature": 0.1,
+            "response_mime_type": "application/json",
+        },
+    }
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/{settings.gemini_vision_model}:generateContent"
+    with httpx.Client(timeout=60) as client:
+        response = client.post(
+            url,
+            headers={
+                "x-goog-api-key": settings.gemini_api_key or "",
+                "Content-Type": "application/json",
+            },
+            json=payload,
+        )
+    if response.status_code >= 400:
+        raise RuntimeError(f"Gemini vision request failed: {response.status_code} {response.text[:500]}")
+
+    return parse_gemini_inspection_response(response.json())
+
+
+def merge_provider_inspections(
+    openai_inspection: ImageInspectionResponse,
+    gemini_inspection: ImageInspectionResponse,
+) -> ImageInspectionResponse:
+    model_candidates = consensus_model_candidates(
+        openai_inspection.model_candidates,
+        gemini_inspection.model_candidates,
+    )
+    if not model_candidates:
+        model_candidates = sorted(
+            [*openai_inspection.model_candidates, *gemini_inspection.model_candidates],
+            key=lambda item: item.confidence,
+            reverse=True,
+        )[:5]
+
+    warnings = dedupe_strings(
+        [
+            "OpenAIとGeminiの画像解析結果を統合しています。モデル/ラインは合意または候補として扱い、最終確認が必要です。",
+            *openai_inspection.warnings,
+            *gemini_inspection.warnings,
+        ]
+    )
+    return ImageInspectionResponse(
+        brand_candidates=merge_brand_candidates(
+            openai_inspection.brand_candidates,
+            gemini_inspection.brand_candidates,
+        ),
+        model_candidates=model_candidates[:5],
+        condition_status=merge_condition_status(openai_inspection, gemini_inspection),
+        condition_confidence=round(
+            (openai_inspection.condition_confidence + gemini_inspection.condition_confidence) / 2,
+            2,
+        ),
+        visible_signals=dedupe_strings(
+            [*openai_inspection.visible_signals, *gemini_inspection.visible_signals]
+        )[:12],
+        missing_photo_angles=dedupe_strings(
+            [*openai_inspection.missing_photo_angles, *gemini_inspection.missing_photo_angles]
+        )[:8],
+        warnings=warnings,
+    )
+
+
+def merge_brand_candidates(
+    openai_candidates: list[BrandCandidate],
+    gemini_candidates: list[BrandCandidate],
+) -> list[BrandCandidate]:
+    merged: dict[str, BrandCandidate] = {}
+    for candidate in [*openai_candidates, *gemini_candidates]:
+        key = candidate.brand.strip().upper()
+        existing = merged.get(key)
+        if not existing:
+            merged[key] = candidate
+            continue
+        merged[key] = BrandCandidate(
+            brand=existing.brand,
+            confidence=min(1.0, max(existing.confidence, candidate.confidence) + 0.1),
+            evidence=" / ".join(dedupe_strings([existing.evidence, candidate.evidence])),
+        )
+    return sorted(merged.values(), key=lambda item: item.confidence, reverse=True)[:5]
+
+
+def consensus_model_candidates(
+    openai_candidates: list[ModelCandidate],
+    gemini_candidates: list[ModelCandidate],
+) -> list[ModelCandidate]:
+    results = []
+    for openai_candidate in openai_candidates:
+        openai_key = canonical_model_line(openai_candidate.model)
+        if not openai_key:
+            continue
+        for gemini_candidate in gemini_candidates:
+            gemini_key = canonical_model_line(gemini_candidate.model)
+            if openai_key != gemini_key:
+                continue
+            confidence = min(
+                1.0,
+                ((openai_candidate.confidence + gemini_candidate.confidence) / 2) + 0.15,
+            )
+            results.append(
+                ModelCandidate(
+                    brand=openai_candidate.brand or gemini_candidate.brand,
+                    model=openai_key,
+                    confidence=round(confidence, 2),
+                    evidence=(
+                        f"OpenAI: {openai_candidate.evidence} / "
+                        f"Gemini: {gemini_candidate.evidence}"
+                    ),
+                    distinguishing_features=dedupe_strings(
+                        [
+                            *openai_candidate.distinguishing_features,
+                            *gemini_candidate.distinguishing_features,
+                        ]
+                    )[:10],
+                )
+            )
+    return sorted(results, key=lambda item: item.confidence, reverse=True)
+
+
+def canonical_model_line(value: str | None) -> str | None:
+    text = (value or "").upper().replace("-", " ").replace("_", " ")
+    japanese_text = value or ""
+    is_chanel = "CHANEL" in text or "シャネル" in japanese_text
+    if (is_chanel and "22" in text) or "CHANEL 22" in text:
+        return "CHANEL 22"
+    if (is_chanel and "19" in text) or "CHANEL 19" in text:
+        return "CHANEL 19"
+    if (is_chanel and "BOY" in text) or "ボーイ" in japanese_text:
+        return "CHANEL Boy"
+    if "COCO HANDLE" in text or "ココハンドル" in japanese_text:
+        return "CHANEL Coco Handle"
+    if "DOUBLE FLAP" in text or "ダブルフラップ" in japanese_text:
+        return "CHANEL Classic Double Flap"
+    if "CLASSIC FLAP" in text or "マトラッセ" in japanese_text:
+        return "CHANEL Classic Flap"
+    return None
+
+
+def merge_condition_status(
+    openai_inspection: ImageInspectionResponse,
+    gemini_inspection: ImageInspectionResponse,
+) -> str:
+    if openai_inspection.condition_status == gemini_inspection.condition_status:
+        return openai_inspection.condition_status
+    if openai_inspection.condition_confidence >= gemini_inspection.condition_confidence:
+        return openai_inspection.condition_status
+    return gemini_inspection.condition_status
 
 
 def upload_files_to_payloads(images: list[UploadFile]) -> list[ImagePayload]:
@@ -235,6 +427,59 @@ def parse_inspection_response(payload: dict[str, Any]) -> ImageInspectionRespons
     )
 
 
+def parse_gemini_inspection_response(payload: dict[str, Any]) -> ImageInspectionResponse:
+    text = extract_gemini_output_text(payload).strip()
+    return parse_inspection_data(json.loads(strip_json_fences(text)))
+
+
+def parse_inspection_data(data: dict[str, Any]) -> ImageInspectionResponse:
+    condition_status = data.get("condition_status") or "不明"
+    if condition_status not in ALLOWED_CONDITION_STATUS:
+        condition_status = "不明"
+
+    brand_candidates = [
+        BrandCandidate(
+            brand=str(item.get("brand") or "不明").strip() or "不明",
+            confidence=coerce_confidence(item.get("confidence")),
+            evidence=str(item.get("evidence") or ""),
+        )
+        for item in data.get("brand_candidates", [])
+        if isinstance(item, dict)
+    ]
+    if not brand_candidates:
+        brand_candidates = [
+            BrandCandidate(brand="不明", confidence=0.0, evidence="画像からブランドを確認できませんでした")
+        ]
+
+    model_candidates = [
+        ModelCandidate(
+            brand=str(item.get("brand") or "不明").strip() or "不明",
+            model=str(item.get("model") or "不明").strip() or "不明",
+            confidence=coerce_confidence(item.get("confidence")),
+            evidence=str(item.get("evidence") or ""),
+            distinguishing_features=list_of_strings(item.get("distinguishing_features")),
+        )
+        for item in data.get("model_candidates", [])
+        if isinstance(item, dict)
+    ]
+
+    warnings = list_of_strings(data.get("warnings"))
+    if not warnings:
+        warnings = [DEFAULT_WARNING]
+    elif DEFAULT_WARNING not in warnings:
+        warnings.append(DEFAULT_WARNING)
+
+    return ImageInspectionResponse(
+        brand_candidates=brand_candidates[:5],
+        model_candidates=model_candidates[:5],
+        condition_status=condition_status,
+        condition_confidence=coerce_confidence(data.get("condition_confidence")),
+        visible_signals=list_of_strings(data.get("visible_signals")),
+        missing_photo_angles=list_of_strings(data.get("missing_photo_angles")),
+        warnings=warnings,
+    )
+
+
 def extract_output_text(payload: dict[str, Any]) -> str:
     if isinstance(payload.get("output_text"), str):
         return payload["output_text"]
@@ -251,6 +496,22 @@ def extract_output_text(payload: dict[str, Any]) -> str:
                 chunks.append(text)
     if not chunks:
         raise RuntimeError("OpenAI response did not contain output text")
+    return "\n".join(chunks)
+
+
+def extract_gemini_output_text(payload: dict[str, Any]) -> str:
+    chunks = []
+    for candidate in payload.get("candidates", []):
+        if not isinstance(candidate, dict):
+            continue
+        content = candidate.get("content")
+        if not isinstance(content, dict):
+            continue
+        for part in content.get("parts", []):
+            if isinstance(part, dict) and isinstance(part.get("text"), str):
+                chunks.append(part["text"])
+    if not chunks:
+        raise RuntimeError("Gemini response did not contain output text")
     return "\n".join(chunks)
 
 
@@ -277,3 +538,15 @@ def list_of_strings(value: Any) -> list[str]:
     if not isinstance(value, list):
         return []
     return [str(item).strip() for item in value if str(item).strip()]
+
+
+def dedupe_strings(values: list[str]) -> list[str]:
+    seen = set()
+    result = []
+    for value in values:
+        text = str(value).strip()
+        if not text or text in seen:
+            continue
+        seen.add(text)
+        result.append(text)
+    return result

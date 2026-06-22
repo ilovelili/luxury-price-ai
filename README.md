@@ -158,7 +158,15 @@ Optional `/image-inspection` environment variables:
 ```sh
 OPENAI_API_KEY=sk-replace-with-your-openai-api-key
 OPENAI_VISION_MODEL=gpt-5.5
+GEMINI_API_KEY=replace-with-your-gemini-api-key
+GEMINI_VISION_MODEL=gemini-3.5-flash
 ```
+
+When `GEMINI_API_KEY` is set, `/image-inspection/analyze` and
+`/image-inspection/analyze-dify` run OpenAI Vision and Gemini Vision, then merge
+the results. Matching model/line candidates are normalized into canonical names
+such as `CHANEL 22`, `CHANEL Classic Flap`, or `CHANEL Classic Double Flap`.
+If Gemini is not configured, the endpoints fall back to OpenAI-only inspection.
 
 `/health` is public for Render health checks. JSON API endpoints such as `/auction-analysis`, `/image-auction-analysis`, and `/price-estimate` require:
 
@@ -172,6 +180,43 @@ If using the text-only analysis endpoint from Dify or another tool, configure th
 - URL: `https://<render-service>.onrender.com/auction-analysis`
 - Header: `X-API-Key: <APP_API_KEY>`
 - Header: `content-type: application/json`
+
+For Dify image intake, configure the HTTP request node to call:
+
+- Method: `POST`
+- URL: `https://<render-service>.onrender.com/image-inspection/analyze-dify`
+- Header: `X-API-Key: <APP_API_KEY>`
+- Header: `content-type: application/json`
+- Body: pass Dify file variables in `item_images`, `item_photos`, or `files`
+
+The backend handles the OpenAI + Gemini consensus. Dify does not need to call
+Gemini directly unless you want a fully custom workflow branch inside Dify.
+
+The `/image-auction-analysis` result also calls the configured Dify workflow
+after backend pricing completes. The backend sends the user inputs, uploaded
+photos, inferred request, price estimate, auction stats, comparable auction
+records, missing inputs, and image inspection summary to Dify. Dify should use
+its knowledge base/RAG documents to produce the final staff-facing appraisal
+rationale shown under `査定コメント`.
+
+Recommended Dify workflow input variables:
+
+- `item_description`
+- `item_category`
+- `brand`
+- `item_shape`
+- `item_name`
+- `item_color`
+- `condition_status`
+- `item_photos`
+- `appraisal_context`
+- `market_price_range`
+- `purchase_offer_range`
+- `price_basis`
+- `confidence`
+- `missing_inputs`
+- `comparable_count`
+- `qualified_comparable_count`
 
 ## Custom Form
 

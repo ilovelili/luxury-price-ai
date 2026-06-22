@@ -16,6 +16,10 @@ services:
         sync: false
       - key: OPENAI_VISION_MODEL
         value: "gpt-5.5"
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: GEMINI_VISION_MODEL
+        value: "gemini-3.5-flash"
       - key: PRICE_MARGIN_RATE
         value: "0.25"
       - key: PRICE_RISK_DISCOUNT_RATE
