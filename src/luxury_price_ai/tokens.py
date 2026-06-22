@@ -20,6 +20,8 @@ TOKEN_DICTIONARY = {
         "CHANEL19",
         "クラシックフラップ",
         "CLASSIC FLAP",
+        "CLASSIC DOUBLE FLAP",
+        "DOUBLE FLAP",
         "ダブルフラップ",
         "シングルフラップ",
         "BOY",
@@ -41,7 +43,12 @@ TOKEN_DICTIONARY = {
     ],
     "materials": [
         "キャビアスキン",
+        "CAVIAR LEATHER",
+        "CAVIAR SKIN",
+        "CAVIAR",
         "ラムスキン",
+        "LAMBSKIN",
+        "LAMB SKIN",
         "グレインドカーフ",
         "カーフスキン",
         "リザード",
@@ -169,9 +176,16 @@ def canonical_token(value: str | None) -> str:
         "CHANEL 19": "シャネル19",
         "NEVERFULL": "ネヴァーフル",
         "CLASSIC FLAP": "マトラッセ",
+        "CLASSIC DOUBLE FLAP": "ダブルフラップ",
+        "DOUBLE FLAP": "ダブルフラップ",
         "BOY": "ボーイ",
         "BOY CHANEL": "ボーイ",
         "COCO HANDLE": "ココハンドル",
+        "CAVIAR LEATHER": "キャビアスキン",
+        "CAVIAR SKIN": "キャビアスキン",
+        "CAVIAR": "キャビアスキン",
+        "LAMBSKIN": "ラムスキン",
+        "LAMB SKIN": "ラムスキン",
     }
     return aliases.get(text, text)
 
