@@ -14,6 +14,7 @@ from luxury_price_ai.models import BrandCandidate, ImageInspectionResponse, Mode
 
 MAX_IMAGES = 12
 MAX_IMAGE_BYTES = 10 * 1024 * 1024
+VISION_TIMEOUT_SECONDS = 120
 ALLOWED_CONDITION_STATUS = {
     "新品・未使用",
     "ほぼ新品",
@@ -61,10 +62,17 @@ def inspect_luxury_image_payloads(
 
     image_inputs = prepare_image_inputs(images)
     prompt = image_inspection_prompt()
-    openai_inspection = inspect_with_openai(image_inputs, prompt, settings)
+    try:
+        openai_inspection = inspect_with_openai(image_inputs, prompt, settings)
+    except Exception as exc:
+        if not settings.gemini_api_key:
+            raise
+        gemini_inspection = inspect_with_gemini(images, prompt, settings)
+        gemini_inspection.warnings.append(f"OpenAI画像解析は失敗しました: {exc}")
+        return gemini_inspection
+
     if not settings.gemini_api_key:
         return openai_inspection
-
     try:
         gemini_inspection = inspect_with_gemini(images, prompt, settings)
     except Exception as exc:
@@ -93,7 +101,7 @@ def inspect_with_openai(
         "max_output_tokens": 1600,
     }
 
-    with httpx.Client(timeout=60) as client:
+    with httpx.Client(timeout=VISION_TIMEOUT_SECONDS) as client:
         response = client.post(
             "https://api.openai.com/v1/responses",
             headers={
@@ -138,7 +146,7 @@ def inspect_with_gemini(
         },
     }
     url = f"https://generativelanguage.googleapis.com/v1beta/models/{settings.gemini_vision_model}:generateContent"
-    with httpx.Client(timeout=60) as client:
+    with httpx.Client(timeout=VISION_TIMEOUT_SECONDS) as client:
         response = client.post(
             url,
             headers={
