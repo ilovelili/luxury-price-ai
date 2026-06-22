@@ -415,12 +415,38 @@ def attach_appraisal_rationale(
     except DifyConfigError:
         return response
     except Exception as exc:
+        response.appraisal_rationale = build_fallback_appraisal_rationale(response)
+        response.appraisal_rationale_source = "Backend fallback"
         response.appraisal_rationale_error = f"Dify appraisal workflow failed: {exc}"
         return response
 
     response.appraisal_rationale = draft.text
     response.appraisal_rationale_source = "Dify Knowledge workflow"
     return response
+
+
+def build_fallback_appraisal_rationale(response: ImageAuctionAnalysisResponse) -> str:
+    request = response.inferred_request
+    estimate = response.estimate
+    parts = [
+        f"{request.brand or 'ブランド不明'} {request.item_name or request.shape or request.category or '商品'} の参考査定です。",
+        f"参考市場価格は {format_price_range_for_display(estimate.market_price_jpy)}、買取提示レンジは {format_price_range_for_display(estimate.purchase_offer_jpy)} です。",
+        f"比較対象は {estimate.comparable_count} 件、厳格条件一致は {estimate.qualified_comparable_count} 件です。",
+    ]
+    if estimate.price_basis:
+        parts.append(f"算出根拠: {estimate.price_basis}")
+    if response.missing_inputs:
+        parts.append(f"追加確認が必要な情報: {'、'.join(response.missing_inputs)}")
+    if response.inspection and response.inspection.model_candidates:
+        candidate = response.inspection.model_candidates[0]
+        parts.append(f"画像上のモデル候補: {candidate.model}（confidence {candidate.confidence:.0%}）")
+    return "\n".join(parts)
+
+
+def format_price_range_for_display(price_range) -> str:
+    if not price_range:
+        return "算出不可"
+    return f"{price_range.low:,}円 - {price_range.mid:,}円 - {price_range.high:,}円"
 
 
 def has_uploaded_images(images: list[UploadFile]) -> bool:

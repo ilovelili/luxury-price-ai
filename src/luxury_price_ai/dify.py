@@ -5,8 +5,6 @@ import json
 from typing import Any
 
 import httpx
-from fastapi import UploadFile
-
 from luxury_price_ai.config import Settings
 from luxury_price_ai.models import ImageAuctionAnalysisResponse
 
@@ -34,10 +32,10 @@ class DifyClient:
         *,
         form_values: dict[str, str],
         analysis_response: ImageAuctionAnalysisResponse,
-        images: list[UploadFile],
+        images: list[object],
     ) -> DifyDraft:
         with httpx.Client(timeout=60) as client:
-            files = self._upload_images(client, images)
+            files: list[dict[str, str]] = []
             payload = self._workflow_payload(
                 form_values=form_values,
                 analysis_response=analysis_response,
@@ -77,43 +75,19 @@ class DifyClient:
             "item_name": form_values.get("item_name", ""),
             "item_color": form_values.get("item_color", ""),
             "condition_status": form_values.get("condition_status", ""),
-            "item_photos": files,
         }
+        if files:
+            inputs["item_photos"] = files
         if rich_context:
             inputs.update(build_appraisal_context_inputs(analysis_response))
-        return {
+        payload = {
             "inputs": inputs,
-            "files": files,
             "response_mode": "blocking",
             "user": self.user,
         }
-
-    def _upload_images(self, client: httpx.Client, images: list[UploadFile]) -> list[dict[str, str]]:
-        uploaded: list[dict[str, str]] = []
-        for image in images:
-            if not image.filename or not image.content_type or not image.content_type.startswith("image/"):
-                continue
-            content = image.file.read()
-            image.file.seek(0)
-            if not content:
-                continue
-            response = client.post(
-                f"{self.base_url}/files/upload",
-                headers=self._headers(),
-                data={"user": self.user},
-                files={"file": (image.filename, content, image.content_type)},
-            )
-            response.raise_for_status()
-            file_id = response.json().get("id")
-            if file_id:
-                uploaded.append(
-                    {
-                        "type": "image",
-                        "transfer_method": "local_file",
-                        "upload_file_id": file_id,
-                    }
-                )
-        return uploaded
+        if files:
+            payload["files"] = files
+        return payload
 
     def _headers(self) -> dict[str, str]:
         return {"Authorization": f"Bearer {self.api_key}"}
