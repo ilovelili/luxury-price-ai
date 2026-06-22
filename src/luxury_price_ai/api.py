@@ -1064,7 +1064,7 @@ def render_normalized_request(request: AuctionAnalysisRequest | PriceEstimateReq
     values = [
         ("brand", request.brand),
         ("category", request.category),
-        ("shape", request.shape),
+        ("アイテム種別", request.shape),
         ("rank", request.rank),
     ]
     tags = "".join(
