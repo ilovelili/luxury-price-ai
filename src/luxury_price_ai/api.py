@@ -20,6 +20,7 @@ from luxury_price_ai.intake import (
     image_analysis_confidence,
     image_analysis_missing_inputs,
 )
+from luxury_price_ai.model_resolver import resolve_database_terms_for_inspection
 from luxury_price_ai.models import (
     AuctionAnalysisRequest,
     AuctionAnalysisResponse,
@@ -290,6 +291,41 @@ def run_auction_analysis(request: AuctionAnalysisRequest) -> AuctionAnalysisResp
     return analyze_auction_sales(request, candidates)
 
 
+def enrich_request_with_database_terms(
+    *,
+    request: AuctionAnalysisRequest,
+    inspection: ImageInspectionResponse,
+    candidates,
+    settings,
+) -> AuctionAnalysisRequest:
+    terms = resolve_database_terms_for_inspection(
+        inspection=inspection,
+        candidates=candidates,
+        settings=settings,
+    )
+    if not terms:
+        return request
+    title = append_unique_terms(request.title, terms)
+    if title == request.title:
+        return request
+    return request.model_copy(update={"title": title})
+
+
+def append_unique_terms(title: str, terms: list[str]) -> str:
+    parts = [part for part in title.split(" ") if part]
+    seen = {part.upper() for part in parts}
+    for term in terms:
+        value = term.strip()
+        if not value:
+            continue
+        key = value.upper()
+        if key in seen:
+            continue
+        parts.append(value)
+        seen.add(key)
+    return " ".join(parts)
+
+
 def run_strict_auction_analysis(
     request: AuctionAnalysisRequest,
     estimate: PriceEstimateResponse,
@@ -375,14 +411,21 @@ def run_image_auction_analysis(
         condition_status=condition_status,
         item_description=item_description,
     )
+    candidates = fetch_candidate_sales(request.brand, request.category, request.sold_after)
+    settings = get_settings()
+    request = enrich_request_with_database_terms(
+        request=request,
+        inspection=inspection,
+        candidates=candidates,
+        settings=settings,
+    )
     estimate_request = PriceEstimateRequest.model_validate(
         {
             **request.model_dump(),
             "limit": 20,
         }
     )
-    candidates = fetch_candidate_sales(request.brand, request.category, request.sold_after)
-    estimate = estimate_price(estimate_request, candidates, get_settings())
+    estimate = estimate_price(estimate_request, candidates, settings)
     analysis = run_strict_auction_analysis(request, estimate, candidates)
     missing_inputs = image_analysis_missing_inputs(inspection, request)
     return ImageAuctionAnalysisResponse(

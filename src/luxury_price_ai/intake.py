@@ -40,62 +40,6 @@ BAG_WORDS = {
     "バックパック",
 }
 
-IMAGE_SEARCH_ALIASES = [
-    (
-        ("CHANEL CLASSIC DOUBLE FLAP", "CLASSIC DOUBLE FLAP", "DOUBLE FLAP"),
-        ["マトラッセ", "クラシックフラップ", "ダブルフラップ"],
-    ),
-    (
-        ("CHANEL CLASSIC FLAP", "CLASSIC FLAP"),
-        ["マトラッセ", "クラシックフラップ"],
-    ),
-    (
-        ("CHANEL BOY", "BOY CHANEL"),
-        ["ボーイシャネル", "ボーイ"],
-    ),
-    (
-        ("CHANEL COCO HANDLE", "COCO HANDLE"),
-        ["ココハンドル"],
-    ),
-    (
-        ("CHANEL 22", "CHANEL22"),
-        ["シャネル22"],
-    ),
-    (
-        ("CHANEL 19", "CHANEL19"),
-        ["シャネル19"],
-    ),
-    (
-        ("CAVIAR LEATHER", "CAVIAR SKIN", "CAVIAR", "GRAINED CALFSKIN", "GRAINED LEATHER"),
-        ["キャビアスキン"],
-    ),
-    (
-        ("LAMBSKIN", "LAMB SKIN", "LAMB LEATHER"),
-        ["ラムスキン"],
-    ),
-    (
-        ("GOLD HARDWARE", "GOLD METAL", "GOLD TONE", "GOLD CHAIN", "GOLD CC"),
-        ["ゴールド金具"],
-    ),
-    (
-        ("SILVER HARDWARE", "SILVER METAL", "SILVER TONE", "SILVER CHAIN", "SILVER CC"),
-        ["シルバー金具"],
-    ),
-    (
-        ("BLACK",),
-        ["ブラック"],
-    ),
-    (
-        ("WHITE",),
-        ["ホワイト"],
-    ),
-    (
-        ("BEIGE",),
-        ["ベージュ"],
-    ),
-]
-
-
 def build_price_request_from_description(description: str, limit: int = 10) -> PriceEstimateRequest:
     text = description.strip()
     return PriceEstimateRequest(
@@ -161,12 +105,11 @@ def build_auction_request_from_image_inspection(
     normalized_rank = normalize_condition_status(condition_status)
 
     inspection_text = image_search_text(inspection)
-    enriched_inspection_text = enrich_image_search_text(inspection_text)
     inferred_shape = (
         normalized_shape
         or infer_shape(item_name)
         or infer_shape(item_description)
-        or infer_shape(enriched_inspection_text)
+        or infer_shape(inspection_text)
     )
     title_parts = [
         normalized_brand or inferred_brand,
@@ -174,7 +117,7 @@ def build_auction_request_from_image_inspection(
         item_color.strip(),
         inferred_shape or "",
         item_description.strip(),
-        enriched_inspection_text,
+        inspection_text,
     ]
     title = " ".join(part for part in title_parts if part)
     return AuctionAnalysisRequest(
@@ -263,30 +206,6 @@ def image_search_text(inspection: ImageInspectionResponse) -> str:
         )
     parts.extend(inspection.visible_signals)
     return " ".join(part.strip() for part in parts if part and part.strip())
-
-
-def enrich_image_search_text(text: str) -> str:
-    upper = text.upper()
-    additions = []
-    for aliases, terms in IMAGE_SEARCH_ALIASES:
-        if any(alias in upper for alias in aliases):
-            additions.extend(terms)
-    return " ".join(dedupe_text_parts([text, *additions]))
-
-
-def dedupe_text_parts(parts: list[str]) -> list[str]:
-    seen = set()
-    result = []
-    for part in parts:
-        value = part.strip()
-        if not value:
-            continue
-        key = value.upper()
-        if key in seen:
-            continue
-        seen.add(key)
-        result.append(value)
-    return result
 
 
 def infer_category(text: str) -> str | None:
